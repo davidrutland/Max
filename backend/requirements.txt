@@ -1,4 +1,4 @@
-fastapi==0.115.6
+fastapi==0.141.1
 # Pinned explicitly, not left to fastapi's transitive resolution: `mcp` declares an open
 # `starlette>=0.27`, so an unconstrained rebuild resolves starlette to 1.x and silently breaks
 # fastapi 0.115.6 (which requires <0.42). Bump these two together, never one alone.
