@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Calivi itself is MIT licensed (see `LICENSE`). It bundles and redistributes the third-party
+Max is MIT licensed (see `LICENSE`). It bundles and redistributes the third-party
 assets below, which carry their own licenses.
 
 ## Fonts — JetBrains Mono Nerd Font

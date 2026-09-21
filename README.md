@@ -345,6 +345,7 @@ Commits must be signed off under the [DCO](DCO) (`git commit -s`). There is no C
 ## License
 
 [MIT](LICENSE) © 2026 Orkun Soylu
+© 2026 David Rutland
 
 Icons by [Lucide](https://lucide.dev) (ISC). Typeface: JetBrains Mono Nerd Font
 (SIL OFL 1.1). Full attribution for bundled third-party assets is in
