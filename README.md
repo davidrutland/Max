@@ -1,7 +1,10 @@
-# calivi
+# Max
 
 A self-hosted, multi-user chat interface for Ollama and OpenAI-compatible servers.
 You pick which model runs where: the server first, then the model on it.
+
+Max is a deliberate fork of Calivi, with the goal of progressively owning its
+runtime, context, retrieval, tooling, and UI architecture.
 
 Your own GPU box, Ollama Cloud, OpenRouter, Moonshot, LM Studio, vLLM,
 llama.cpp-server — all from the same chat window.
@@ -12,7 +15,7 @@ llama.cpp-server — all from the same chat window.
     <img
       src="docs/images/app-light.png"
       width="900"
-      alt="The Calivi chat window: server and model pickers in the top bar, a streamed answer containing a bash code block with a Copy button, a tokens-per-second readout, and a web_search tool chip under the next message."
+      alt="The Max chat window: server and model pickers in the top bar, a streamed answer containing a bash code block with a Copy button, a tokens-per-second readout, and a web_search tool chip under the next message."
     />
   </picture>
 </p>
@@ -37,7 +40,7 @@ llama.cpp-server — all from the same chat window.
 
 > ### ⚠️ Heavy development — use at your own risk
 >
-> Calivi works today and it is what I use daily, but it is under **heavy development**.
+> Max works today and it is under **heavy development**.
 > Things break between commits, defaults change, and security holes get found and closed
 > as the code moves. There is no stable release channel, no versioned upgrade path, and no
 > guarantee that today's database survives tomorrow's migration untouched.
@@ -90,8 +93,8 @@ llama.cpp-server — all from the same chat window.
 **Requirements:** Docker and Docker Compose. Nothing else.
 
 ```bash
-git clone https://github.com/orkun-soylu/calivi.git
-cd calivi
+git clone https://github.com/davidrutland/Max.git
+cd Max
 docker compose up -d --build
 ```
 
@@ -138,9 +141,9 @@ like Linear that still serve it). For stdio servers (`npx …`), see below.
 
 ### stdio MCP servers — the bundled bridge
 
-Calivi never runs stdio servers itself: that would execute an npm or PyPI package named in a web
+Max never runs stdio servers itself: that would execute an npm or PyPI package named in a web
 form inside the backend container, next to the database and the session key. A bundled, opt-in
-bridge container runs them instead and speaks HTTP to Calivi.
+bridge container runs them instead and speaks HTTP to Max.
 
 ```bash
 cp stdio-bridge/servers.example.json stdio-bridge/servers.json
@@ -161,7 +164,7 @@ date is right now.
 virtualenv. Do not put `npx -y <package>` in the config: that downloads and runs whatever the
 registry serves at the moment of the call, which is the thing the bridge is here to avoid.
 
-> **⚠️ The bridge runs code Calivi does not control.** It is therefore locked down by default: its
+> **⚠️ The bridge runs code Max does not control.** It is therefore locked down by default: its
 > own `internal: true` network (**no internet, no LAN**), non-root, read-only filesystem, all
 > capabilities dropped, no published port and no authentication of its own.
 >
@@ -320,7 +323,7 @@ warnings live there.
 
 Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
 
-Calivi is designed as a single-tenant application running on your own network. Before
+Max is designed as a self-hosted application running under your control. Before
 exposing it directly to the internet, know that:
 
 - Web search results and document attachments are treated as **untrusted content** and

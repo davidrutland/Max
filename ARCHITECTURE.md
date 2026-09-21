@@ -1,10 +1,11 @@
-# Calivi — Architecture & Design Rationale
+# Max — Architecture & Design Rationale
 
-Self-hosted, multi-user chat application. An alternative to Open WebUI — it connects to your
-own Ollama servers (or any OpenAI-compatible endpoint) with **manual** server/model selection.
+Self-hosted, multi-user chat application. Max connects to Ollama servers or any
+OpenAI-compatible endpoint with **manual** server/model selection.
 
-This document records *why* things are the way they are: the design decisions, the bugs that
-shaped them, and the traps that are easy to fall into again. The code says what; this says why.
+Max is a deliberate fork of Calivi. This document records *why* things are the
+way they are: the design decisions, the bugs that shaped them, and the traps that
+are easy to fall into again. The code says what; this says why.
 
 ## Scope
 
