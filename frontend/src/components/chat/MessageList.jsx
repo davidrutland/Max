@@ -23,6 +23,7 @@ export default function MessageList({
   onDeleteMessage,
   onDecide,
   onInspect,
+  mobile = false,
 }) {
   const t = useT();
   const scrollRef = useRef(null);
@@ -65,11 +66,13 @@ export default function MessageList({
   }, [chat?.messages, streaming, thinking, pending.user]);
 
   return (
-    <div className="relative flex-1 min-h-0">
+    <div className={`relative flex-1 min-h-0 ${mobile ? "mobile-message-list" : ""}`}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="themed-scroll h-full overflow-y-auto px-6 py-6 space-y-4"
+        className={`themed-scroll h-full overflow-y-auto px-6 py-6 space-y-4 ${
+          mobile ? "mobile-message-scroll" : ""
+        }`}
       >
         {chat?.messages.map((m) =>
           m.role === "user" && edit.editingId === m.id ? (
@@ -92,13 +95,14 @@ export default function MessageList({
               onDelete={() => onDeleteMessage(m.id)}
               onImageClick={onImageClick}
               onInspect={onInspect}
+              mobile={mobile}
             />
           )
         )}
 
         {pending.user !== null && (
           <div className="flex justify-end">
-            <div className="max-w-[70%] rounded-2xl px-4 py-2 whitespace-pre-wrap bg-accent text-white">
+            <div className={`max-w-[70%] rounded-2xl px-4 py-2 whitespace-pre-wrap bg-accent text-white ${mobile ? "mobile-message-bubble" : ""}`}>
               {pending.images.length > 0 && (
                 <div className="flex gap-2 flex-wrap mb-2">
                   {/* Same behaviour as the persisted images in MessageItem: it must stay

@@ -42,13 +42,13 @@ export default function AuthView({ registrationEnabled, onAuthed }) {
   }
 
   return (
-    <div className="flex items-center justify-center h-screen w-full bg-neutral-950">
+    <div className="mobile-auth flex items-center justify-center h-screen w-full bg-neutral-950">
       <form
         onSubmit={submit}
         className="w-80 bg-neutral-900 rounded-2xl shadow-2xl ring-1 ring-neutral-700/60 p-6 flex flex-col gap-3"
       >
         <div className="text-center mb-1">
-          <div className="text-2xl text-neutral-100">Calivi</div>
+          <div className="text-2xl text-neutral-100">Max</div>
           <div className="text-xs text-neutral-500 mt-1">{t("auth.tagline")}</div>
         </div>
 

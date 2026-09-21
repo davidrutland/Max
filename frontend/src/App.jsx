@@ -6,6 +6,7 @@ import AuthView from "./components/AuthView.jsx";
 import { SettingsIcon } from "./components/icons.jsx";
 import { api, setUnauthorizedHandler } from "./api.js";
 import { useT } from "./i18n.js";
+import MobileShell from "./components/MobileShell.jsx";
 
 // Renders a chat as plain text: title + "User:" / "Assistant (model @ server):" blocks.
 // The content stays raw markdown (copy-raw philosophy); the model attribution is valuable
@@ -43,6 +44,22 @@ export default function App() {
   const [activeChat, setActiveChat] = useState(null);
   const [servers, setServers] = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 767px)").matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+
+    update();
+    mq.addEventListener?.("change", update);
+
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
 
   // handleMessageSent runs after the stream ends (seconds later); a ref is used instead of a
   // stale closure so it refreshes whichever chat is active at that moment (critical after a fork).
@@ -128,6 +145,11 @@ export default function App() {
     setActiveChatId(chat.id);
   }
 
+  function handleMobileSelectChat(id) {
+    setActiveChatId(id);
+    if (!id) setActiveChat(null);
+  }
+
   async function handleDeleteChat(id) {
     await api.deleteChat(id);
     if (id === activeChatId) {
@@ -188,6 +210,34 @@ export default function App() {
   }
   if (!me) {
     return <AuthView registrationEnabled={registrationEnabled} onAuthed={handleAuthed} />;
+  }
+
+  if (isMobile) {
+    return (
+      <MobileShell
+        chats={chats}
+        activeChatId={activeChatId}
+        activeChat={activeChat}
+        servers={servers}
+        me={me}
+        onSelectChat={handleMobileSelectChat}
+        onNewChat={handleNewChat}
+        onDeleteChat={handleDeleteChat}
+        onRenameChat={handleRenameChat}
+        onTogglePin={handleTogglePin}
+        onCopyChat={handleCopyChat}
+        onMessageSent={handleMessageSent}
+        onForked={handleForked}
+        onOpenSettings={() => setSettingsOpen(true)}
+        settingsOpen={settingsOpen}
+        onCloseSettings={() => setSettingsOpen(false)}
+        onAddServer={handleAddServer}
+        onUpdateServer={handleUpdateServer}
+        onDeleteServer={handleDeleteServer}
+        onMeUpdated={setMe}
+        onAccountDeleted={handleLogout}
+      />
+    );
   }
 
   return (

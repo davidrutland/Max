@@ -17,7 +17,7 @@ export const LANGUAGES = [
   { code: "zh", label: "中文" },
 ];
 
-let currentLang = localStorage.getItem(LANG_KEY) || "tr";
+let currentLang = localStorage.getItem(LANG_KEY) || "en";
 const listeners = new Set();
 
 export function getLang() {

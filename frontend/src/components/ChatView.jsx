@@ -13,7 +13,15 @@ import { useT } from "../i18n.js";
 
 /** Orchestrates the chat screen: combines the selected target (useServerModel), stream state
  * (useChatStream) and attachment/edit state; the rendering is done by child components. */
-export default function ChatView({ chat, servers, onMessageSent, onForked, onOpenSettings }) {
+export default function ChatView({
+  chat,
+  servers,
+  onMessageSent,
+  onForked,
+  onOpenSettings,
+  mobile = false,
+  onBack,
+}) {
   const t = useT();
   const { serverId, model, setTarget, upServers, selectedServer } = useServerModel(servers);
   const stream = useChatStream();
@@ -185,17 +193,59 @@ export default function ChatView({ chat, servers, onMessageSent, onForked, onOpe
   };
 
   return (
-    <div className="flex-1 flex flex-col h-screen">
-      <div className="flex items-center gap-3 px-5 py-4">
-        <ServerModelPicker servers={upServers} value={{ serverId, model }} onChange={setTarget} />
-        <button
-          onClick={onOpenSettings}
-          className="ml-auto text-neutral-300 opacity-70 hover:opacity-100"
-          title={t("common.settings")}
-        >
-          <SettingsIcon className="w-5 h-5" />
-        </button>
-      </div>
+    <div className={`flex-1 flex flex-col h-screen ${mobile ? "mobile-chat-view" : ""}`}>
+      {mobile ? (
+        <header className="mobile-chat-header">
+          <button
+            type="button"
+            className="mobile-back-button"
+            onClick={onBack}
+            aria-label="Back to conversations"
+          >
+            ‹
+          </button>
+
+          <div className="mobile-chat-heading">
+            <div className="mobile-brand">Max</div>
+            <div className="mobile-chat-target">
+              {model || "Select a model"}
+              {selectedServer?.name ? ` · ${selectedServer.name}` : ""}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="mobile-header-button"
+            onClick={onOpenSettings}
+            title={t("common.settings")}
+            aria-label={t("common.settings")}
+          >
+            ⚙
+          </button>
+        </header>
+      ) : (
+        <div className="flex items-center gap-3 px-5 py-4">
+          <ServerModelPicker servers={upServers} value={{ serverId, model }} onChange={setTarget} />
+          <button
+            onClick={onOpenSettings}
+            className="ml-auto text-neutral-300 opacity-70 hover:opacity-100"
+            title={t("common.settings")}
+          >
+            <SettingsIcon className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
+      {mobile && (
+        <div className="mobile-model-picker">
+          <ServerModelPicker
+            servers={upServers}
+            value={{ serverId, model }}
+            onChange={setTarget}
+            mobile
+          />
+        </div>
+      )}
 
       <MessageList
         chat={chat}
@@ -208,6 +258,7 @@ export default function ChatView({ chat, servers, onMessageSent, onForked, onOpe
         onDeleteMessage={handleDeleteMessage}
         onDecide={handleApprovalDecision}
         onInspect={setInspecting}
+        mobile={mobile}
       />
 
       <Composer
@@ -225,6 +276,7 @@ export default function ChatView({ chat, servers, onMessageSent, onForked, onOpe
         onPaste={handlePaste}
         useTools={useTools}
         onToggleUseTools={() => setUseTools((v) => !v)}
+        mobile={mobile}
       />
 
       <ToolOutputModal tool={inspecting} onClose={() => setInspecting(null)} />

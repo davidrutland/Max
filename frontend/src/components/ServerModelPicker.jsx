@@ -1,9 +1,11 @@
 // Server + model picker (used both in the top bar and in the message editor).
 // value: {serverId: number, model: string}. onChange returns the same shape. Manual selection.
-export default function ServerModelPicker({ servers, value, onChange }) {
+export default function ServerModelPicker({ servers, value, onChange, mobile = false }) {
   const { serverId, model } = value;
   const selectedServer = servers.find((s) => s.id === serverId);
-  const cls = "bg-neutral-800 text-sm rounded-lg px-2 py-1 border border-neutral-700";
+  const cls = mobile
+    ? "mobile-picker-select bg-neutral-800 text-sm rounded-lg px-2 py-1"
+    : "bg-neutral-800 text-sm rounded-lg px-2 py-1 border border-neutral-700";
 
   function handleServerChange(raw) {
     const next = Number(raw);

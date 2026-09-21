@@ -141,7 +141,7 @@ export default function SettingsModal({ servers, me, onClose, onAdd, onUpdate, o
   return (
     <div className="fixed inset-0 bg-black/40 z-50">
       <div
-        className="absolute bg-neutral-900 rounded-2xl shadow-2xl ring-1 ring-neutral-700/60 flex flex-col overflow-hidden"
+        className="settings-modal-panel absolute bg-neutral-900 rounded-2xl shadow-2xl ring-1 ring-neutral-700/60 flex flex-col overflow-hidden"
         style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
       >
         {/* Title bar = drag handle */}
@@ -149,7 +149,7 @@ export default function SettingsModal({ servers, me, onClose, onAdd, onUpdate, o
           onMouseDown={startDrag}
           className="flex items-center justify-between px-5 py-3 cursor-move select-none shrink-0"
         >
-          <div className="flex gap-1">
+          <div className="settings-tabs flex gap-1">
             {TABS.map((tb) => (
               <button
                 key={tb.id}

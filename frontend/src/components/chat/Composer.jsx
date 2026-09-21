@@ -18,6 +18,7 @@ export default function Composer({
   onPaste,
   useTools,
   onToggleUseTools,
+  mobile = false,
 }) {
   const t = useT();
   const fileInputRef = useRef(null);
@@ -64,7 +65,7 @@ export default function Composer({
   }
 
   return (
-    <div className="px-5 py-5">
+    <div className={`px-5 py-5 ${mobile ? "mobile-composer" : ""}`}>
       {images.length > 0 && (
         <div className="flex gap-2 flex-wrap mb-2">
           {images.map((src, i) => (
