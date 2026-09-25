@@ -21,3 +21,8 @@ __pycache__/
 
 # Live bridge config (may name local paths / tokens); the template is servers.example.json
 stdio-bridge/servers.json
+
+# Search service local environment and runtime state
+search_service/venv/
+search_service/logs/
+.max-search-service.pid

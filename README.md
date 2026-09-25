@@ -1,352 +1,261 @@
 # Max
 
-A self-hosted, multi-user chat interface for Ollama and OpenAI-compatible servers.
-You pick which model runs where: the server first, then the model on it.
+Max is an independent downstream fork of [Calivi](https://github.com/orkun-soylu/calivi), focused on building a reliable, easily deployable local AI stack with the tools and behaviour wanted here, without accumulating the problems or baggage that can come with larger projects.
 
-Max is a deliberate fork of Calivi, with the goal of progressively owning its
-runtime, context, retrieval, tooling, and UI architecture.
+Max keeps useful parts of Calivi where they make sense, while developing its own UI, retrieval, tooling, context management, and deployment approach.
 
-Your own GPU box, Ollama Cloud, OpenRouter, Moonshot, LM Studio, vLLM,
-llama.cpp-server — all from the same chat window.
+For the broader Calivi architecture, features, and original documentation, see the [Calivi repository](https://github.com/orkun-soylu/calivi).
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-dark.png">
-    <img
-      src="docs/images/app-light.png"
-      width="900"
-      alt="The Max chat window: server and model pickers in the top bar, a streamed answer containing a bash code block with a Copy button, a tokens-per-second readout, and a web_search tool chip under the next message."
-    />
-  </picture>
-</p>
+## Current stack
 
-<p align="center"><sub>The interface, rendered with placeholder data — not a real conversation.</sub></p>
+Max currently provides:
 
-```
-┌──────────────┐     ┌──────────────┐     ┌────────────────────────┐
-│   Browser    │────▶│ nginx (:8090)│────▶│ FastAPI backend        │
-└──────────────┘     │  SPA + /api  │     │  SQLite · tool loop ·  │
-                     └──────────────┘     │  approvals             │
-                                          └───────────┬────────────┘
-                                                      │
-              ┌───────────────┬───────────────────────┼───────────────┐
-              ▼               ▼                       ▼               ▼
-        Ollama servers  OpenAI-compatible      SearXNG (bundled)   MCP servers
-        (LAN / remote)  API (cloud / local)    web search          ├─ HTTP, direct
-                                                                   └─ stdio, through
-                                                                      the sandboxed
-                                                                      bridge container
-```
+* A local AI chat application based on Calivi.
+* Docker Compose deployment for the main application.
+* A mobile-friendly, WhatsApp-style UI while retaining the desktop interface.
+* OpenDyslexic font support.
+* Local web search and page retrieval.
+* A dedicated search/retrieval service using Camoufox and readability extraction.
+* `web_search` and `web_fetch` tools.
+* SearXNG as an internal JSON search facade.
+* Configurable environment-based deployment settings.
+* A single `max.sh` command for managing the Docker stack and local search service.
 
-> ### ⚠️ Heavy development — use at your own risk
->
-> Max works today and it is under **heavy development**.
-> Things break between commits, defaults change, and security holes get found and closed
-> as the code moves. There is no stable release channel, no versioned upgrade path, and no
-> guarantee that today's database survives tomorrow's migration untouched.
->
-> If you run it: **watch the commits, update often, and keep your own backups.** Read the
-> diff before you pull. **Use at your own risk.**
-
----
-
-## Highlights
-
-- **Multi-server, manual selection** — You choose the server and model from the top bar;
-  no automatic routing. Only reachable (`up`) servers appear in the picker.
-- **Two server types** — `ollama` (native `/api/chat`) and `openai` (OpenAI-compatible
-  `/v1/chat/completions`). One interface drives both.
-- **Streaming with reasoning** — Responses stream in; reasoning models' thinking tokens
-  are shown in a separate box. Interrupt with the **Stop** button or **Esc** (whatever
-  was generated so far is kept).
-- **Multi-user** — httpOnly cookie + JWT sessions, admin/user roles. Each user sees only
-  their own chats. Registration can be closed by an admin.
-- **Vision** — Send images to vision-capable models, including paste-from-clipboard and a
-  full-screen viewer (lightbox).
-- **Document attachments** — PDF / docx / txt / code / csv / json are extracted as
-  **text** and handed to the model (lossless text, not OCR).
-- **Tools (🔧)** — One toggle in the composer offers the tool layer to the model, which then
-  calls tools *on its own initiative*; which tool ran is visible in the conversation and
-  survives a reload. Bundled SearXNG provides web search.
-- **MCP servers** — Connect [Model Context Protocol](https://modelcontextprotocol.io) servers
-  (Context7, GitHub, Exa…) and their tools become available to the model alongside the built-in
-  ones. HTTP servers directly; stdio servers through a bundled, sandboxed bridge container.
-- **Approval before anything changes** — Read-only tools run on their own; a tool that can change
-  something is **off until you enable it**, and then it asks you before every single run. Silence
-  is a denial, never consent.
-- **Secrets encrypted at rest** — MCP tokens and provider API keys are encrypted in the database,
-  so a copy of it (a backup, a stolen volume) does not hand over your credentials.
-- **Message editing** — Edit a message and either **Update** (regenerate from that point,
-  optionally on a different model) or **New chat** (branch while keeping history).
-- **Every answer accounted for** — Each reply carries the model and the server that produced it
-  and the tokens/sec it ran at, stored with the message so they survive a reload — a chat you
-  came back to still tells you what answered, where, and how fast. Copy any single answer, or
-  the whole conversation, to the clipboard in one click; delete a message to walk the chat back.
-- **Markdown + math** — Code blocks with copy buttons, tables, KaTeX.
-- **9 languages** — TR, EN, DE, ES, IT, PT, RU, JA, ZH.
-- **Light/dark theme** with a selectable accent color.
-
----
+The intention is to keep the core deployment straightforward while allowing individual services to remain independently testable and replaceable.
 
 ## Installation
 
-**Requirements:** Docker and Docker Compose. Nothing else.
+### Requirements
+
+At minimum:
+
+* Linux or another environment capable of running Docker Compose.
+* Docker.
+* Python 3.13 for the local search service.
+
+Clone Max:
 
 ```bash
 git clone https://github.com/davidrutland/Max.git
 cd Max
-docker compose up -d --build
 ```
 
-Open **http://localhost:8090** (or the host's LAN address: `http://192.168.x.x:8090`).
+### Configure the search service
 
-> **The first person to sign up becomes the admin.** Create the first account from the
-> registration screen — it is the **super admin** (id 1) and cannot be deleted or
-> demoted. Later sign-ups become regular users; you can close registration entirely
-> under Settings → General.
+The search service is included in the repository as a separate component.
 
-### Adding a server
-
-Settings (⚙) → **Servers** → use the form at the bottom:
-
-| Type | Fields | Example |
-|---|---|---|
-| `ollama` | host + port | `192.168.1.50` : `11434` |
-| `openai` | base URL + API key | `https://openrouter.ai/api/v1` |
-
-The model list is fetched automatically (`/api/tags` or `/v1/models`). A green light on
-the row means the server is reachable; red servers are hidden from the chat picker.
-
-> **Ollama must be reachable over the network.** By default Ollama listens only on
-> `127.0.0.1`. To reach it from another machine, run it with `OLLAMA_HOST=0.0.0.0`.
-
-### Adding an MCP server
-
-Settings (⚙) → **MCP** → presets for Context7, GitHub and Exa prefill the URL and the auth
-header, or fill the form yourself. A green light means the handshake succeeded; the row
-expands to show which tools were registered — each with a checkbox, so individual tools can be
-switched off without removing the server.
-
-Turn the **🔧 toggle** on in the composer for any of it to reach the model: it gates the whole
-tool layer, web search and MCP alike.
-
-| Server | URL | Auth |
-|---|---|---|
-| Context7 | `https://mcp.context7.com/mcp` | `CONTEXT7_API_KEY` header — optional, raises rate limits |
-| GitHub | `https://api.githubcopilot.com/mcp/readonly` | `Authorization: Bearer <PAT>` |
-| Exa | `https://mcp.exa.ai/mcp` | `Authorization: Bearer <key>` |
-
-Transport is **HTTP** — either Streamable HTTP or the older HTTP+SSE (pick `SSE` for servers
-like Linear that still serve it). For stdio servers (`npx …`), see below.
-
-### stdio MCP servers — the bundled bridge
-
-Max never runs stdio servers itself: that would execute an npm or PyPI package named in a web
-form inside the backend container, next to the database and the session key. A bundled, opt-in
-bridge container runs them instead and speaks HTTP to Max.
+Set it up with:
 
 ```bash
-cp stdio-bridge/servers.example.json stdio-bridge/servers.json
-# add your servers to stdio-bridge/Dockerfile (pinned) and to servers.json
-docker compose --profile stdio-bridge up -d --build
+cd search_service
+./setup.sh
+cd ..
 ```
 
-Then add it in Settings → MCP like any other server, transport **HTTP**, no secret:
+The service runs locally on port `8787` by default.
 
-```
-http://calivi-mcp-bridge:8096/servers/time/mcp
-```
-
-The example ships `mcp-server-time`, which answers the question models are worst at — what the
-date is right now.
-
-**Servers are installed into the image, pinned** (`stdio-bridge/Dockerfile`), each in its own
-virtualenv. Do not put `npx -y <package>` in the config: that downloads and runs whatever the
-registry serves at the moment of the call, which is the thing the bridge is here to avoid.
-
-> **⚠️ The bridge runs code Max does not control.** It is therefore locked down by default: its
-> own `internal: true` network (**no internet, no LAN**), non-root, read-only filesystem, all
-> capabilities dropped, no published port and no authentication of its own.
->
-> A server that needs the internet — `mcp-server-fetch`, for instance — **will not work** until you
-> remove `internal: true` from the `mcp-bridge` network. That grants it the internet *and* your
-> LAN; Docker routes both the same way, and separating them needs a `DOCKER-USER` firewall rule.
-> Decide it deliberately.
-
-If a bridged server shows **no tools**, it is almost always the read-only gate: a server that does
-not set `readOnlyHint` has its tools default to `off`, and you enable them per tool in Settings.
-`mcp-server-time` sets it; `mcp-server-fetch` does not.
-
-> **⚠️ Only read-only tools are offered by default.** A tool is offered on its own only if the
-> server marks it read-only; anything else starts **off**. You can switch a tool on per tool in
-> the MCP tab — `auto` to let it run, or **`approve`** to have it stop and ask you before every
-> run — so a mutating tool is always a deliberate act, never a discovery.
->
-> That mark is the *server's own claim* — treat it as a filter, not a sandbox. **Give MCP servers
-> least-privilege credentials**: a fine-grained, read-only GitHub token scoped to the
-> repositories you actually want, not a broad one. The GitHub preset points at the `/readonly`
-> endpoint so the restriction is enforced by GitHub as well.
->
-> Adding an MCP server is admin-only, and its tools become available to **every user** of the
-> instance.
-
-### Configuration (environment variables)
-
-Everything has a sensible default. To override, create a `.env` file in the project root
-(Compose reads it automatically):
+Check that it is working:
 
 ```bash
-# .env
-CALIVI_PORT=8090        # exposed port
-COOKIE_SECURE=false     # set to true behind HTTPS — see the warning below
-CALIVI_SECRET_KEY=...   # signs sessions AND encrypts stored secrets — see the note below
+curl -sS http://127.0.0.1:8787/health
 ```
 
-> ### Set `CALIVI_SECRET_KEY` if you back up the data volume
-> Unset, the backend generates and stores the key at `/data/secret_key` — the same volume as
-> `calivi.db`. A copy of that volume then contains both your data *and* the key, so whoever
-> holds it can mint a valid session for any user, admin included, **and** decrypt the MCP
-> tokens and provider API keys stored in the database. Setting the variable stops the key
-> from being written there at all:
->
-> ```bash
-> openssl rand -hex 32   # put the output in .env, then: docker compose up -d
-> ```
->
-> **Changing an existing key** signs everyone out once *and* makes every stored secret
-> unreadable, because the same key encrypts them. To change it without losing them, hand the
-> old one over for one boot:
->
-> ```bash
-> CALIVI_SECRET_KEY=<the new key>
-> CALIVI_SECRET_KEY_OLD=<the previous key>
-> ```
->
-> On startup every stored secret is re-encrypted under the new key; remove
-> `CALIVI_SECRET_KEY_OLD` afterwards. Skip this and the secrets simply have to be re-entered
-> in Settings — nothing else breaks, and the app still starts.
+A healthy service should return a JSON response indicating that it is operational.
 
-Other variables the backend understands (`backend/app/config.py`): `DB_PATH`,
-`SYSTEM_PROMPTS_PATH`, `TOOLS_CONFIG_PATH`, `SEARXNG_URL`, `CORS_ORIGINS`,
-`LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS`, `REGISTER_MAX_SUCCESS`,
-`REGISTER_WINDOW_SECONDS`, `OLLAMA_CHAT_TIMEOUT` (seconds, default `300` — raise it if you
-send very large prompts, see [ARCHITECTURE](ARCHITECTURE.md#long-prompts-and-the-streaming-timeout)),
-`CALIVI_SECRET_KEY_OLD` (key rotation, above).
+### Environment configuration
 
-> ### ⚠️ Putting it behind HTTPS: set `COOKIE_SECURE=true`
-> This Compose file serves plain HTTP, so the default is `false`. If you put Calivi
-> behind a TLS-terminating reverse proxy (Traefik, Caddy, nginx…), **set it to `true`** —
-> otherwise the session cookie is sent without the `Secure` flag.
->
-> The opposite is a trap too: with `true` over plain HTTP the browser refuses to send the
-> cookie and **login fails silently**. Most browsers treat `http://localhost` as
-> privileged, so this can work on localhost and then break from a LAN address.
-
----
-
-## Configuration files
-
-The YAML files under `config/` are mounted into the container and re-read on every
-request — **no restart needed**. Most are also editable from the Settings UI.
-
-| File | Purpose |
-|---|---|
-| `config/system_prompts.yml` | Per-model system prompts (the `default` key is the fallback) — **not in git**, see below |
-| `config/tools.yml` | Tool (function-calling) layer: on/off, loop cap, `web_search` options |
-| `config/vision_models.yml` | Manual overrides for vision detection (`force_vision` / `force_text`) |
-| `searxng/settings.yml` | Bundled SearXNG. No port is exposed; change `secret_key` if you expose it publicly |
-
-`config/system_prompts.yml` is **git-ignored**: system prompts tend to name your own
-hardware and models, and they are the one config that is genuinely personal. Start from
-the example:
+Copy `.env.example` to `.env` if you need to change the default deployment settings:
 
 ```bash
-cp config/system_prompts.example.yml config/system_prompts.yml
+cp .env.example .env
 ```
 
-Running without it is fine too — no system message is sent, and the Settings →
-System Prompts editor creates the file when you first save. The "Default" button in that
-editor restores the factory defaults from `backend/app/defaults/system_prompts.yml`.
+The `.env` file is local configuration and is not committed to the repository.
 
----
+## Running Max
 
-## Backups
+The included `max.sh` script manages both the Docker application and the host-side search service.
 
-All user data (`calivi.db` plus the session signing key) lives in a named volume called
-`calivi-data` — not a bind mount.
+Start:
 
 ```bash
-docker compose stop calivi-backend
-VOL=$(docker volume inspect calivi_calivi-data --format '{{.Mountpoint}}')
-sudo tar czf calivi-backup-$(date +%F).tar.gz --numeric-owner -C "$VOL" .
-docker compose start calivi-backend
+./max.sh start
 ```
 
-Use `--numeric-owner` when restoring: `calivi.db` and `secret_key` belong to different
-users.
+Check status:
 
----
+```bash
+./max.sh status
+```
+
+Stop:
+
+```bash
+./max.sh stop
+```
+
+Restart:
+
+```bash
+./max.sh restart
+```
+
+The script starts the search service when necessary and leaves an independently running, healthy search service alone.
+
+Once started, open `http://127.0.0.1:8090/` in a browser. The default frontend port is `8090` and can be changed with `CALIVI_PORT` in `.env`.
+
+The main Max services are managed through Docker Compose.
+
+## Web search and retrieval
+
+Max separates **search** from **page retrieval**.
+
+### `web_search`
+
+`web_search` queries the local search pipeline and returns **enhanced search-result snippets**.
+
+The search service can perform search-engine queries, retrieve useful result information, and enhance the snippets returned to Max. This means the model should normally be able to answer from the search results without immediately fetching every individual result.
+
+This is deliberate: fetching every result would add unnecessary latency, bandwidth, context usage, and opportunities for retrieval failures.
+
+### `web_fetch`
+
+`web_fetch` retrieves the readable content of a specific URL.
+
+It should be used when the model needs:
+
+* The actual text of an article or page.
+* More detail than the search snippet provides.
+* Source-specific verification.
+* Information that is not adequately represented in the search results.
+
+The intended pattern is therefore:
+
+```text
+web_search → enhanced snippets → answer when sufficient
+
+web_search → identify relevant source → web_fetch → inspect full page
+```
+
+The search service is maintained separately from Max:
+
+[github.com/davidrutland/search_service](https://github.com/davidrutland/search_service)
+
+This keeps the browser, retrieval, and page-cleaning machinery independently testable and avoids making the Max backend responsible for the browser environment itself.
+
+## Architecture
+
+The current web-retrieval path is:
+
+```text
+Max backend
+    │
+    ├── web_search
+    │       │
+    │       ▼
+    │   SearXNG
+    │       │
+    │       ▼
+    │   search_service
+    │       │
+    │       └── search engines / browser retrieval / snippet enhancement
+    │
+    └── web_fetch
+            │
+            ▼
+        search_service
+            │
+            └── readable page extraction
+```
+
+SearXNG is retained as an internal JSON-facing layer rather than being exposed as a separate user-facing search service.
 
 ## Development
 
-```bash
-# Frontend (vite dev server on :5173)
-cd frontend && npm install && npm run dev
-npm test                    # vitest + jsdom
+Max is an independent downstream project. Changes are developed and tested here rather than being submitted as pull requests to the upstream Calivi project.
 
-# Backend
-cd backend
-python3 -m venv .venv-test && ./.venv-test/bin/pip install -r requirements-dev.txt
-./.venv-test/bin/pytest     # real HTTP layer (httpx ASGITransport), no live server needed
-./.venv-test/bin/uvicorn app.main:app --reload --port 8000
+Useful checks before committing changes include:
+
+```bash
+git diff --check
 ```
 
-When the backend runs separately, the frontend is served from a different origin
-(`:5173`), so `CORS_ORIGINS` comes into play — it already defaults to
-`http://localhost:5173`.
+For Python changes:
 
-**See [`ARCHITECTURE.md`](ARCHITECTURE.md) for architecture, design decisions and known
-pitfalls** — the component map, tool loop, security notes and "don't fall into this again"
-warnings live there.
+```bash
+python -m compileall backend
+```
 
----
+And for Compose configuration:
 
-## Built with
+```bash
+docker-compose config
+```
 
-**Backend:** FastAPI · SQLAlchemy · SQLite · httpx · PyJWT · bcrypt
-**Frontend:** React · Vite · Tailwind · react-markdown · KaTeX
-**Deployment:** Docker Compose (backend + nginx/frontend + SearXNG)
+The project aims to keep changes small, understandable, and independently testable.
 
----
+## Roadmap
 
-## Security
+The roadmap is deliberately practical rather than attempting to reproduce every feature of larger AI platforms.
 
-Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
+### Context and conversation
 
-Max is designed as a self-hosted application running under your control. Before
-exposing it directly to the internet, know that:
+* Better handling of large documents and attachments.
+* Conversation summarisation and context compression.
+* A structured `compress_conversation` representation containing:
 
-- Web search results and document attachments are treated as **untrusted content** and
-  passed to the model inside delimited blocks (prompt-injection defence).
-- The frontend is served with a strict Content-Security-Policy; remote images in model
-  output are not fetched (a data-exfiltration vector).
-- Login attempts are rate-limited per account (default: 5 attempts / 15 minutes).
-- Tools that can change state are **off by default**. An admin has to enable them, and even
-  then every single run waits for a person to approve it; silence counts as a denial.
+  * events
+  * decisions
+  * key facts
+  * unresolved questions
+* Persistent memory and structured JSON state.
+* Better preservation of useful context across context-window pressure and restarts.
 
----
+### Retrieval
+
+* More robust search-result handling.
+* Search caching and deduplication.
+* Better retrieval error reporting.
+* An offline searchable document/index store.
+* Clearer separation between retrieved evidence, metadata, and model context.
+* Better handling of large source documents and uploaded files.
+
+### Tools and sandboxing
+
+* A proper sandbox, probably based on OpenHands.
+* Python and shell execution within explicit security boundaries.
+* Better tool error semantics so failures are clearly distinguishable from successful results.
+* Continued expansion of useful local tools without unnecessarily expanding the core application.
+
+### UI
+
+* Further improvements to the mobile interface.
+* Additional desktop UI improvements.
+* Better presentation of tool activity, retrieved sources, and long-running operations.
+
+### External information
+
+* A real-time date/time tool rather than injecting changing timestamps into the stable system prompt.
+* Current web information without unnecessarily invalidating the model's cached prompt prefix.
+* RSS integration, including support for self-hosted services such as FreshRSS.
+
+## Philosophy
+
+Max is intended to remain relatively small and understandable.
+
+The goal is not to build an everything-platform. The goal is to have a local AI assistant that can reason, use useful tools, retrieve evidence, work with local data, and remain practical to deploy and maintain.
+
+Where an upstream project or another open-source project provides something useful, Max can borrow or adapt the relevant approach. It does not need to inherit every feature, dependency, architectural decision, or source of complexity.
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome — see CONTRIBUTING.md.
 
-Commits must be signed off under the [DCO](DCO) (`git commit -s`). There is no CLA.
-
+Commits must be signed off under the DCO (git commit -s). There is no CLA.
 ## License
 
-[MIT](LICENSE) © 2026 Orkun Soylu
-© 2026 David Rutland
+Max is released under the [MIT License](LICENSE).
 
-Icons by [Lucide](https://lucide.dev) (ISC). Typeface: JetBrains Mono Nerd Font
-(SIL OFL 1.1). Full attribution for bundled third-party assets is in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+© 2026 Orkun Soylu © 2026 David Rutland
+
+Icons by Lucide (ISC). Typeface: JetBrains Mono Nerd Font (SIL OFL 1.1). Full attribution for bundled third-party assets is in THIRD-PARTY-NOTICES.md.

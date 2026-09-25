@@ -2,6 +2,8 @@ services:
   calivi-backend:
     build: ./backend
     container_name: calivi-backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     depends_on:
       - calivi-searxng
@@ -35,6 +37,7 @@ services:
       # like a dead server. The default suits typical chat; raise it for local models with
       # very large context windows. See ARCHITECTURE.md.
       - OLLAMA_CHAT_TIMEOUT=${OLLAMA_CHAT_TIMEOUT:-300}
+      - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-15}
     volumes:
       - calivi-data:/data
       - ./config:/config
@@ -51,6 +54,8 @@ services:
     image: searxng/searxng:latest
     container_name: calivi-searxng
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./searxng:/etc/searxng
 

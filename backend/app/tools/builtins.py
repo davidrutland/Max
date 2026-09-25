@@ -37,12 +37,50 @@ async def _web_search(args: dict) -> str:
     return search_client.format_results(query, results)
 
 
+_WEB_FETCH_DESC = (
+    "Fetches the full readable content of a specific web page URL. Use it when you "
+    "already have a page URL and need the actual page or article text rather than a "
+    "search-result snippet."
+)
+
+_WEB_FETCH_PARAMS = {
+    "type": "object",
+    "properties": {
+        "url": {
+            "type": "string",
+            "description": "The specific web page URL to fetch.",
+        }
+    },
+    "required": ["url"],
+}
+
+
+async def _web_fetch(args: dict) -> str:
+    url = (args.get("url") or "").strip()
+    if not url:
+        return "ERROR: empty URL."
+
+    result = await search_client.fetch(url)
+    return search_client.format_fetch(result)
+
+
 registry.register(
     Tool(
         name="web_search",
         description=_WEB_SEARCH_DESC,
         parameters=_WEB_SEARCH_PARAMS,
         handler=_web_search,
+        source="builtin",
+        mutating=False,
+    )
+)
+
+registry.register(
+    Tool(
+        name="web_fetch",
+        description=_WEB_FETCH_DESC,
+        parameters=_WEB_FETCH_PARAMS,
+        handler=_web_fetch,
         source="builtin",
         mutating=False,
     )

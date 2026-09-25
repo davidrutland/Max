@@ -21,7 +21,7 @@ def _load_secret() -> str:
     calivi.db — so a copy of that volume (a backup) carries both the data and the key that
     signs sessions, and holding it is enough to forge a session for any user. It now also
     guards the encrypted columns (crypto.py), which makes the volume self-sufficient in a
-    second way. Prefer CALIVI_SECRET_KEY from the environment; see the note in README.md.
+    second way. Prefer CALIVI_SECRET_KEY from the environment when explicitly configured.
     """
     env = os.environ.get("CALIVI_SECRET_KEY")
     if env:
@@ -64,7 +64,7 @@ OLLAMA_PROBE_TIMEOUT = 2.0
 # that the prompt was simply too long. Configurable so large-context setups can raise it.
 OLLAMA_CHAT_TIMEOUT = float(os.environ.get("OLLAMA_CHAT_TIMEOUT", "300"))
 OPENAI_PROBE_TIMEOUT = 5.0  # a little longer, since these APIs are remote
-SEARCH_TIMEOUT = 15.0  # SearXNG JSON search
+SEARCH_TIMEOUT = float(os.environ.get("SEARCH_TIMEOUT", "15"))
 
 # Login brute-force protection — see rate_limit.py. The window is per account.
 LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "5"))
