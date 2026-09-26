@@ -50,7 +50,7 @@ SEARCH_TIMEOUT_MS = 6500
 BROWSER_SETTLE_MS = 250
 REQUEST_DEADLINE = 12.0
 ENHANCE_BUDGET = 7.0
-MIN_ARTICLE_CHARS = 500
+MIN_ARTICLE_CHARS = 250
 MAX_SUMMARY_CHARS = 2000
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 MAX_ARTICLE_TEXT_BYTES = 10 * 1024 * 1024
@@ -225,6 +225,55 @@ def canonical_url(url: str) -> str:
 
     except Exception:
         return url
+
+
+def is_ddg_ad_result(url: str) -> bool:
+    if not url:
+        return False
+
+    url_lower = url.lower()
+
+    if "duckduckgo.com/y.js" in url_lower:
+        return True
+
+    if "ad_type=txad" in url_lower:
+        return True
+
+    if "ad_provider=" in url_lower:
+        return True
+
+    if "ad_domain=" in url_lower:
+        return True
+
+    return False
+
+
+def filter_ad_results(
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    filtered = []
+    removed = 0
+
+    for result in results:
+        url = result.get("url", "")
+
+        if is_ddg_ad_result(url):
+            removed += 1
+            logger.info(
+                "FILTERING DDG AD: %s",
+                url,
+            )
+            continue
+
+        filtered.append(result)
+
+    if removed:
+        logger.info(
+            "FILTERED %d DDG AD RESULT(S)",
+            removed,
+        )
+
+    return filtered
 
 
 def is_html_content(content_type: str) -> bool:
@@ -777,6 +826,9 @@ def search(
                 call_timeout,
                 f"search:{engine}",
             )
+
+            if engine == "ddg":
+                result = filter_ad_results(result)
 
             if result:
                 logger.info(
