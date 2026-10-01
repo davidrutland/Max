@@ -1,261 +1,199 @@
 # Max
 
-> **UI migration:** The previous Max-specific mobile UI and OpenDyslexic integration are temporarily removed while Max is rebased onto the current Calivi UI. The Max-specific UI will be rebuilt on this newer foundation.
+Max is an independent downstream fork of [Calivi](https://github.com/orkun-soylu/calivi).
 
+Max keeps useful parts of Calivi while developing its own UI, retrieval, tooling, context management, and local-AI workflow.
 
-Max is an independent downstream fork of [Calivi](https://github.com/orkun-soylu/calivi), focused on building a reliable, easily deployable local AI stack with the tools and behaviour wanted here, without accumulating the problems or baggage that can come with larger projects.
-
-Max keeps useful parts of Calivi where they make sense, while developing its own UI, retrieval, tooling, context management, and deployment approach.
-
-For the broader Calivi architecture, features, and original documentation, see the [Calivi repository](https://github.com/orkun-soylu/calivi).
+> **Current status:** Max has been rebased onto Calivi v0.6.5. The current Calivi UI is now the foundation for Max's UI development. The previous Max-specific mobile UI and OpenDyslexic integration were deliberately left behind during the rebase and will be rebuilt on this newer foundation.
 
 ## Current stack
 
-Max currently provides:
+* Local AI chat backend
+* Docker Compose deployment
+* Calivi UI foundation
+* Local web search and page retrieval
+* Dedicated search service using Camoufox
+* DuckDuckGo search with Brave fallback
+* Mozilla Readability for page extraction
+* Built-in `web_search` and `web_fetch` tools
+* Configurable search timeout
+* Context usage and conversation compaction inherited from current Calivi
+* `max.sh` for managing the local stack and search service
 
-* A local AI chat application based on Calivi.
-* Docker Compose deployment for the main application.
-* Local web search and page retrieval.
-* A dedicated search/retrieval service using Camoufox and readability extraction.
-* `web_search` and `web_fetch` tools.
-* SearXNG as an internal JSON search facade.
-* Configurable environment-based deployment settings.
-* A single `max.sh` command for managing the Docker stack and local search service.
+## Requirements
 
-The intention is to keep the core deployment straightforward while allowing individual services to remain independently testable and replaceable.
+* Linux
+* Docker and Docker Compose
+* Python 3
+* A local OpenAI-compatible model endpoint
+* Camoufox for the local search service
+
+Max is designed around a local/self-hosted setup. External model providers are not required.
 
 ## Installation
 
-### Requirements
-
-At minimum:
-
-* Linux or another environment capable of running Docker Compose.
-* Docker.
-* Python 3.13 for the local search service.
-
-Clone Max:
+Clone the repository and enter the project directory:
 
 ```bash
 git clone https://github.com/davidrutland/Max.git
 cd Max
 ```
 
-### Configure the search service
-
-The search service is included in the repository as a separate component.
-
-Set it up with:
-
-```bash
-cd search_service
-./setup.sh
-cd ..
-```
-
-The service runs locally on port `8787` by default.
-
-Check that it is working:
-
-```bash
-curl -sS http://127.0.0.1:8787/health
-```
-
-A healthy service should return a JSON response indicating that it is operational.
-
-### Environment configuration
-
-Copy `.env.example` to `.env` if you need to change the default deployment settings:
+Copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-The `.env` file is local configuration and is not committed to the repository.
+Install the search-service environment:
 
-## Running Max
+```bash
+./search_service/setup.sh
+```
 
-The included `max.sh` script manages both the Docker application and the host-side search service.
-
-Start:
+Start Max:
 
 ```bash
 ./max.sh start
 ```
 
-Check status:
+The frontend is available on the configured Calivi port.
+
+## Environment
+
+The main configurable values are documented in `.env.example`.
+
+Important settings include:
+
+```text
+CALIVI_PORT=8090
+COOKIE_SECURE=false
+CALIVI_SECRET_KEY=
+CALIVI_SECRET_KEY_OLD=
+OLLAMA_CHAT_TIMEOUT=300
+SEARCH_TIMEOUT=15
+```
+
+`SEARCH_TIMEOUT` controls the timeout used by the backend when communicating with the local search infrastructure.
+
+## Search
+
+Max's search path uses the local `calivi-search` integration and the host-side `search_service`.
+
+`search_service` provides the actual search-engine access:
+
+* DuckDuckGo is the primary search engine.
+* Brave is used as a fallback.
+* Search results are normalised and deduplicated.
+* Retrieved pages can be extracted using Mozilla Readability.
+
+The built-in `web_search` tool uses the configured `calivi-search` engine.
+
+`web_fetch` provides direct page retrieval through the local search service and is intended for fetching and extracting the contents of a specific URL.
+
+The search service runs separately from the Docker containers on port `8787` and is managed by `max.sh`.
+
+## Managing Max
+
+The `max.sh` wrapper manages both the Docker Compose stack and the local search service.
 
 ```bash
+./max.sh start
+./max.sh stop
+./max.sh restart
 ./max.sh status
 ```
 
-Stop:
+The search service is only stopped by the wrapper when it is the process that the wrapper started.
 
-```bash
-./max.sh stop
-```
-
-Restart:
-
-```bash
-./max.sh restart
-```
-
-The script starts the search service when necessary and leaves an independently running, healthy search service alone.
-
-Once started, open `http://127.0.0.1:8090/` in a browser. The default frontend port is `8090` and can be changed with `CALIVI_PORT` in `.env`.
-
-The main Max services are managed through Docker Compose.
-
-## Web search and retrieval
-
-Max separates **search** from **page retrieval**.
-
-### `web_search`
-
-`web_search` queries the local search pipeline and returns **enhanced search-result snippets**.
-
-The search service can perform search-engine queries, retrieve useful result information, and enhance the snippets returned to Max. This means the model should normally be able to answer from the search results without immediately fetching every individual result.
-
-This is deliberate: fetching every result would add unnecessary latency, bandwidth, context usage, and opportunities for retrieval failures.
-
-### `web_fetch`
-
-`web_fetch` retrieves the readable content of a specific URL.
-
-It should be used when the model needs:
-
-* The actual text of an article or page.
-* More detail than the search snippet provides.
-* Source-specific verification.
-* Information that is not adequately represented in the search results.
-
-The intended pattern is therefore:
+Runtime logs are stored under:
 
 ```text
-web_search → enhanced snippets → answer when sufficient
-
-web_search → identify relevant source → web_fetch → inspect full page
+search_service/logs/
 ```
 
-The search service is maintained separately from Max:
+## Context and compaction
 
-[github.com/davidrutland/search_service](https://github.com/davidrutland/search_service)
+Max currently uses the context handling and conversation compaction functionality absorbed from the current Calivi codebase during the rebase onto v0.6.5.
 
-This keeps the browser, retrieval, and page-cleaning machinery independently testable and avoids making the Max backend responsible for the browser environment itself.
+The UI exposes context usage and the available compaction controls. Compaction is part of the current Max implementation rather than a future roadmap item.
 
-## Architecture
-
-The current web-retrieval path is:
-
-```text
-Max backend
-    │
-    ├── web_search
-    │       │
-    │       ▼
-    │   SearXNG
-    │       │
-    │       ▼
-    │   search_service
-    │       │
-    │       └── search engines / browser retrieval / snippet enhancement
-    │
-    └── web_fetch
-            │
-            ▼
-        search_service
-            │
-            └── readable page extraction
-```
-
-SearXNG is retained as an internal JSON-facing layer rather than being exposed as a separate user-facing search service.
+Further context-management work may build on this foundation, particularly around preserving useful information from long conversations.
 
 ## Development
 
-Max is an independent downstream project. Changes are developed and tested here rather than being submitted as pull requests to the upstream Calivi project.
+The backend is a Python application and the frontend is a Vite/React application.
 
-Useful checks before committing changes include:
+Backend code:
 
-```bash
-git diff --check
+```text
+backend/
 ```
 
-For Python changes:
+Frontend code:
 
-```bash
-python -m compileall backend
+```text
+frontend/
 ```
 
-And for Compose configuration:
+Search service:
 
-```bash
-docker-compose config
+```text
+search_service/
 ```
 
-The project aims to keep changes small, understandable, and independently testable.
+SearXNG configuration retained in the repository is supporting infrastructure for the Calivi stack and is not the logical Max search interface.
+
+Build the frontend/backend containers with:
+
+```bash
+docker-compose build
+```
+
+Start the stack with:
+
+```bash
+./max.sh start
+```
+
+## Upstream relationship
+
+Max is an independent downstream project.
+
+Calivi is treated as an upstream source of useful fixes, features, and ideas. Upstream changes may be selectively incorporated when they fit Max's architecture and goals.
+
+Max does not attempt to remain a patch-for-patch copy of Calivi.
+
+See [`UPSTREAM.md`](UPSTREAM.md) for the fork point and porting policy.
 
 ## Roadmap
 
-The roadmap is deliberately practical rather than attempting to reproduce every feature of larger AI platforms.
+### UI
+
+* Continue rebuilding Max's UI on the current Calivi foundation
+* Restore and improve Max-specific UI features where useful
+* Continue improving desktop and mobile usability
 
 ### Context and conversation
 
-* Better handling of large documents and attachments.
-* Conversation summarisation and context compression.
-* A structured `compress_conversation` representation containing:
-
-  * events
-  * decisions
-  * key facts
-  * unresolved questions
-* Persistent memory and structured JSON state.
-* Better preservation of useful context across context-window pressure and restarts.
+* Build further on the current compaction system
+* Improve handling of very long conversations
+* Preserve important decisions, facts, and unresolved questions during future context-management work
+* Explore persistent memory where appropriate
 
 ### Retrieval
 
-* More robust search-result handling.
-* Search caching and deduplication.
-* Better retrieval error reporting.
-* An offline searchable document/index store.
-* Clearer separation between retrieved evidence, metadata, and model context.
-* Better handling of large source documents and uploaded files.
+* Continue improving search quality and source selection
+* Improve page extraction and retrieval reliability
+* Reduce unnecessary search/tool calls
 
-### Tools and sandboxing
+### Tools
 
-* A proper sandbox, probably based on OpenHands.
-* Python and shell execution within explicit security boundaries.
-* Better tool error semantics so failures are clearly distinguishable from successful results.
-* Continued expansion of useful local tools without unnecessarily expanding the core application.
+* Expand useful local tools
+* Improve tool selection and execution
+* Keep tool interfaces simple and model-friendly
 
-### UI
+### Local AI
 
-* Additional desktop UI improvements.
-* Better presentation of tool activity, retrieved sources, and long-running operations.
-
-### External information
-
-* A real-time date/time tool rather than injecting changing timestamps into the stable system prompt.
-* Current web information without unnecessarily invalidating the model's cached prompt prefix.
-* RSS integration, including support for self-hosted services such as FreshRSS.
-
-## Philosophy
-
-Max is intended to remain relatively small and understandable.
-
-The goal is not to build an everything-platform. The goal is to have a local AI assistant that can reason, use useful tools, retrieve evidence, work with local data, and remain practical to deploy and maintain.
-
-Where an upstream project or another open-source project provides something useful, Max can borrow or adapt the relevant approach. It does not need to inherit every feature, dependency, architectural decision, or source of complexity.
-
-## Contributing
-
-Contributions are welcome — see CONTRIBUTING.md.
-
-Commits must be signed off under the DCO (git commit -s). There is no CLA.
-## License
-
-Max is released under the [MIT License](LICENSE).
-
-© 2026 Orkun Soylu © 2026 David Rutland
-
-Icons by Lucide (ISC). Typeface: JetBrains Mono Nerd Font (SIL OFL 1.1). Full attribution for bundled third-party assets is in THIRD-PARTY-NOTICES.md.
+* Continue optimising Max for self-hosted local models
+* Keep external dependencies and unnecessary cloud services to a minimum

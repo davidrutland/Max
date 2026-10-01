@@ -29,3 +29,6 @@ packaging/out/
 
 # Local search service runtime logs
 search_service/logs/
+
+# Local search service runtime state
+.max-search-service.pid

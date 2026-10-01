@@ -3,12 +3,11 @@
 # inherits the image's default settings/engines; the entries below override them.
 use_default_settings:
   engines:
-    # ahmia + torch are Tor onion search engines; they need a Tor proxy and are pointless for
-    # Calivi's internal JSON search → they logged a "can't register engine" error on every
-    # start. Removed.
-    remove:
-      - ahmia
-      - torch
+    # Only calivi-search is enabled for Max.
+    # The upstream/default SearXNG engines remain in the image but are intentionally
+    # excluded from this internal search facade.
+    keep_only:
+      - calivi-search
 
 server:
   # A single internal instance with no external exposure → a fixed secret is enough.
@@ -23,3 +22,17 @@ search:
     - json                # the Calivi backend uses the JSON API (OFF by default in SearXNG)
   autocomplete: ""
   default_lang: "auto"
+
+engines:
+  - name: calivi-search
+    engine: json_engine
+    shortcut: cs
+    categories:
+      - general
+    enable_http: true
+    timeout: 15
+    search_url: "http://host.docker.internal:8787/search?q={query}"
+    results_query: results
+    title_query: title
+    url_query: url
+    content_query: snippet
