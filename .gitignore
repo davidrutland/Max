@@ -26,3 +26,6 @@ stdio-bridge/servers.json
 appliance/out/
 appliance/.cache/
 packaging/out/
+
+# Local search service runtime logs
+search_service/logs/

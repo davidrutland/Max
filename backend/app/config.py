@@ -84,7 +84,7 @@ BUSY_FILE = os.environ.get("CALIVI_BUSY_FILE", "")
 HOST_SETUP_CODE_FILE = os.environ.get("CALIVI_SETUP_CODE_FILE", "/etc/calivi/setup-code")
 HOST_BOOTSTRAP_CMD = ["sudo", "-n", "/usr/sbin/calivi-bootstrap-user"]
 OPENAI_PROBE_TIMEOUT = 5.0  # a little longer, since these APIs are remote
-SEARCH_TIMEOUT = 15.0  # SearXNG JSON search
+SEARCH_TIMEOUT = float(os.environ.get("SEARCH_TIMEOUT", "15"))
 
 # Login brute-force protection — see rate_limit.py. The window is per account.
 LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", "5"))
