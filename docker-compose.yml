@@ -13,6 +13,7 @@ services:
       - SEARCH_CONFIG_PATH=/config/search.yml
       - TOOLS_CONFIG_PATH=/config/tools.yml
       - SEARXNG_URL=http://calivi-searxng:8080
+      - SANDBOX_BASE_URL=${SANDBOX_BASE_URL:-http://openhands-sandbox:8000}
       # Signs the session cookies AND encrypts the secrets stored in the database (MCP
       # tokens, provider API keys). Left unset, the backend generates and persists
       # /data/secret_key — inside the same volume as calivi.db, so a copy of that volume (a
@@ -63,6 +64,22 @@ services:
     restart: unless-stopped
     volumes:
       - ./searxng:/etc/searxng
+
+  openhands-sandbox:
+    image: ghcr.io/openhands/agent-server:1.48.0-python
+    container_name: openhands-sandbox
+    restart: unless-stopped
+    command:
+      - "--host=0.0.0.0"
+      - "--port=8000"
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - "no-new-privileges:true"
+    volumes:
+      - openhands-workspace:/workspace
 
   calivi-frontend:
     build: ./frontend
@@ -122,3 +139,4 @@ networks:
 
 volumes:
   calivi-data:
+  openhands-workspace:

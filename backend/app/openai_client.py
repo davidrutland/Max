@@ -1,5 +1,7 @@
 import json
+import logging
 import time
+import uuid
 
 import httpx
 
@@ -77,6 +79,25 @@ async def stream_chat(base_url: str, api_key: str | None, model: str, messages: 
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
 
+    diag_id = uuid.uuid4().hex[:12]
+    logging.getLogger("uvicorn.error").warning(
+        "MAX_ROUTING_DIAG %s",
+        json.dumps({
+            "request_id": diag_id,
+            "model": model,
+            "system_messages": [
+                m.get("content")
+                for m in payload["messages"]
+                if m.get("role") == "system"
+            ],
+            "offered_tools": [
+                t.get("function", {}).get("name")
+                for t in payload.get("tools", [])
+            ],
+            "tool_choice": payload.get("tool_choice"),
+        }, ensure_ascii=False),
+    )
+
     # The engine reports no duration, so measure wall-clock: first content token to last.
     first_at = None
     last_at = None
@@ -138,4 +159,11 @@ async def stream_chat(base_url: str, api_key: str | None, model: str, messages: 
             except ValueError:
                 args = {}
             calls.append({"id": slot["id"] or f"call_{i}", "name": slot["name"], "arguments": args})
+        logging.getLogger("uvicorn.error").warning(
+            "MAX_ROUTING_RESULT %s",
+            json.dumps({
+                "request_id": diag_id,
+                "selected_tools": [c["name"] for c in calls],
+            }),
+        )
         yield {"type": "tool_calls", "calls": calls}

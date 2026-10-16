@@ -262,7 +262,8 @@ def test_registered_host_tools_are_all_privileged():
         tools = [t for t in registry._tools.values() if t.source == host.SOURCE]
         assert {t.name for t in tools} == {"bash", "read_file", "write_file", "edit_file", "view_image"}
         assert all(t.privileged for t in tools)
-        assert registry.specs() == [s for s in registry.specs() if s["function"]["name"] == "web_search"]
+        exposed = {s["function"]["name"] for s in registry.specs()}
+        assert exposed.isdisjoint({t.name for t in tools})
     finally:
         for t in host.TOOLS:
             registry._tools.pop(t.name, None)

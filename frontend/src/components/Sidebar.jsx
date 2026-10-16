@@ -4,6 +4,31 @@ import { useT } from "../i18n.js";
 
 const WIDTH_KEY = "calivi_sidebar_width";
 
+const CHAT_GROUPS = [
+  { id: "pinned", label: "Pinned" },
+  { id: "day", label: "Last 24 hours" },
+  { id: "week", label: "Last 7 days" },
+  { id: "month", label: "Last 30 days" },
+  { id: "older", label: "Older" },
+  { id: "archived", label: "Archived" },
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function chatGroup(chat, now) {
+  if (chat.archived) return "archived";
+  if (chat.pinned) return "pinned";
+
+  const timestamp = Date.parse(chat.updated_at || chat.created_at || "");
+  if (!Number.isFinite(timestamp)) return "older";
+
+  const age = Math.max(0, now - timestamp);
+  if (age < DAY_MS) return "day";
+  if (age < 7 * DAY_MS) return "week";
+  if (age < 30 * DAY_MS) return "month";
+  return "older";
+}
+
 export default function Sidebar({
   mobile = false, // phone layout (#61): full-width list with its own header, no resize handle
   onOpenSettings,
@@ -12,6 +37,8 @@ export default function Sidebar({
   onSelectChat,
   onNewChat,
   onDeleteChat,
+  onBulkDeleteChats,
+  onBulkArchiveChats,
   onRenameChat,
   onTogglePin,
   onCopyChat,
@@ -24,6 +51,15 @@ export default function Sidebar({
   const [copied, setCopied] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState(() => ({ day: true }));
+  const [now, setNow] = useState(() => Date.now());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkArchiving, setBulkArchiving] = useState(false);
+  const [chatListStale, setChatListStale] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState("");
   const draggingRef = useRef(false);
 
   // Drag to resize the width
@@ -47,13 +83,210 @@ export default function Sidebar({
     localStorage.setItem(WIDTH_KEY, String(width));
   }, [width]);
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const groupedChats = Object.fromEntries(CHAT_GROUPS.map((group) => [group.id, []]));
+  for (const chat of chats) {
+    groupedChats[chatGroup(chat, now)].push(chat);
+  }
+
+  for (const group of CHAT_GROUPS) {
+    groupedChats[group.id].sort((a, b) => {
+      const aTime = Date.parse(a.updated_at || a.created_at || "") || 0;
+      const bTime = Date.parse(b.updated_at || b.created_at || "") || 0;
+      return bTime - aTime;
+    });
+  }
+
+
   const menuChat = menu ? chats.find((c) => c.id === menu.id) : null;
+  const selectedChats = chats.filter(chat => selectedIds.has(chat.id));
+  const canArchive = selectedChats.some(chat => !chat.archived);
+  const canUnarchive = selectedChats.some(chat => !!chat.archived);
+
+  function toggleSelection(id) {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleGroupSelection(items) {
+    const ids = items.map((chat) => chat.id);
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      const allSelected = ids.every((id) => next.has(id));
+      for (const id of ids) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function cancelSelection() {
+    if (bulkDeleting || bulkArchiving) return;
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function executeBulkDelete() {
+    if (bulkDeleting || bulkArchiving || chatListStale || !confirmBulkDelete || selectedIds.size === 0) return;
+
+    const ids = [...selectedIds];
+    setBulkDeleting(true);
+    setBulkDeleteError("");
+
+    try {
+      const failedIds = await onBulkDeleteChats(ids);
+      if (!Array.isArray(failedIds)) {
+        throw new Error("Invalid bulk-delete response");
+      }
+
+      if (failedIds.length === 0) {
+        setConfirmBulkDelete(false);
+        cancelSelection();
+      } else {
+        setSelectedIds(new Set(failedIds));
+        setConfirmBulkDelete(false);
+        setBulkDeleteError(
+          `${failedIds.length} of ${ids.length} conversations could not be deleted.`
+        );
+      }
+    } catch (error) {
+      console.error("Bulk deletion failed", error);
+      setConfirmBulkDelete(false);
+      setBulkDeleteError(
+        "Deletion could not be completed. Refresh the chat list before retrying."
+      );
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function executeBulkArchive(archived) {
+    if (bulkDeleting || bulkArchiving || chatListStale || confirmBulkDelete) return;
+
+    const ids = chats
+      .filter(chat => selectedIds.has(chat.id) && !!chat.archived !== archived)
+      .map(chat => chat.id);
+
+    if (!ids.length) return;
+
+    setBulkArchiving(true);
+    setBulkDeleteError("");
+
+    try {
+      const result = await onBulkArchiveChats(ids, archived);
+      if (
+        !result ||
+        !Array.isArray(result.failedIds) ||
+        typeof result.refreshFailed !== "boolean"
+      ) {
+        throw new Error("Invalid bulk-archive response");
+      }
+
+      const { failedIds, refreshFailed } = result;
+      if (refreshFailed) setChatListStale(true);
+
+      if (failedIds.length === 0 && !refreshFailed) {
+        setSelectedIds(new Set());
+        setSelectionMode(false);
+        return;
+      }
+
+      const failed = new Set(failedIds);
+      setSelectedIds(previous => {
+        const next = new Set(previous);
+        for (const id of ids) {
+          if (!failed.has(id)) next.delete(id);
+        }
+        return next;
+      });
+
+      const failureMessage = failedIds.length
+        ? `${failedIds.length} of ${ids.length} conversations could not be ${archived ? "archived" : "unarchived"}.`
+        : "";
+
+      setBulkDeleteError(
+        [
+          failureMessage,
+          refreshFailed ? "Chat list could not be refreshed. Reload before making further changes." : "",
+        ].filter(Boolean).join(" ")
+      );
+    } catch (error) {
+      console.error("Bulk archive operation failed", error);
+      setBulkDeleteError(
+        "Archive operation could not be completed. Refresh the chat list before retrying."
+      );
+    } finally {
+      setBulkArchiving(false);
+    }
+  }
+
+  useEffect(() => {
+    const available = new Set(chats.map(chat => chat.id));
+    setSelectedIds(previous => {
+      if ([...previous].every(id => available.has(id))) return previous;
+      return new Set([...previous].filter(id => available.has(id)));
+    });
+  }, [chats]);
+
 
   function openMenu(e, id) {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     setCopied(false);
     setMenu({ id, x: r.right, y: r.bottom + 4 });
+  }
+
+  async function archiveSingleChat(id, archived) {
+    if (bulkDeleting || bulkArchiving || chatListStale || confirmBulkDelete) return;
+
+    setMenu(null);
+    setBulkArchiving(true);
+    setBulkDeleteError("");
+
+    try {
+      const result = await onBulkArchiveChats([id], archived);
+
+      if (
+        !result ||
+        !Array.isArray(result.failedIds) ||
+        typeof result.refreshFailed !== "boolean"
+      ) {
+        throw new Error("Invalid archive response");
+      }
+
+      if (result.refreshFailed) setChatListStale(true);
+
+      const messages = [];
+      if (result.failedIds.length) {
+        messages.push(
+          `Conversation could not be ${archived ? "archived" : "unarchived"}.`
+        );
+      }
+      if (result.refreshFailed) {
+        messages.push(
+          "Chat list could not be refreshed. Reload before making further changes."
+        );
+      }
+
+      setBulkDeleteError(messages.join(" "));
+    } catch (error) {
+      console.error("Single-chat archive operation failed", error);
+      setChatListStale(true);
+      setBulkDeleteError(
+        "Archive operation could not be completed. Reload before retrying."
+      );
+    } finally {
+      setBulkArchiving(false);
+    }
   }
 
   function startRename(id) {
@@ -106,15 +339,123 @@ export default function Sidebar({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto themed-scroll px-3 space-y-1">
-        {chats.map((chat) => (
+      <div className="shrink-0 px-3 pb-2" inert={bulkDeleting || bulkArchiving || chatListStale ? "" : undefined}>
+        {!selectionMode ? (
+          <button type="button"
+            onClick={() => {
+              if (bulkDeleting || bulkArchiving || chatListStale) return;
+              setMenu(null);
+              setRenamingId(null);
+              setSelectionMode(true);
+            }}
+            className="px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors">
+            Select
+          </button>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-neutral-200">
+            <span className="font-semibold">{selectedIds.size} selected</span>
+            <button type="button"
+              onClick={() => setSelectedIds(new Set(chats.map(c => c.id)))}
+              className="ml-auto px-2 py-1 rounded hover:bg-neutral-800">
+              Select all
+            </button>
+            {canArchive && (
+              <button type="button"
+                disabled={bulkArchiving}
+                onClick={() => executeBulkArchive(true)}
+                className="px-2 py-1 rounded hover:bg-neutral-800 disabled:opacity-40">
+                {bulkArchiving ? "Working…" : "Archive selected"}
+              </button>
+            )}
+            {canUnarchive && (
+              <button type="button"
+                disabled={bulkArchiving}
+                onClick={() => executeBulkArchive(false)}
+                className="px-2 py-1 rounded hover:bg-neutral-800 disabled:opacity-40">
+                {bulkArchiving ? "Working…" : "Unarchive selected"}
+              </button>
+            )}
+            <button type="button"
+              disabled={selectedIds.size === 0 || bulkDeleting || bulkArchiving}
+              onClick={() => {
+                setBulkDeleteError("");
+                setConfirmBulkDelete(true);
+              }}
+              className="px-2 py-1 rounded text-red-400 hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed">
+              Delete selected
+            </button>
+            <button type="button"
+              onClick={cancelSelection}
+              className="px-2 py-1 rounded hover:bg-neutral-800">
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {bulkDeleteError && (
+        <div role="alert" className="shrink-0 px-3 pb-2 text-sm text-red-400">
+          {bulkDeleteError}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto themed-scroll px-3 space-y-1" inert={bulkDeleting || bulkArchiving || chatListStale ? "" : undefined}>
+        {CHAT_GROUPS.map((group) => {
+          const items = groupedChats[group.id];
+          if (!items.length) return null;
+
+          const expanded = !!expandedGroups[group.id];
+          const selectedCount = items.filter(chat => selectedIds.has(chat.id)).length;
+
+          return (
+            <div key={group.id}>
+              <div className="flex items-center">
+                {selectionMode && (
+                  <input
+                    type="checkbox"
+                    aria-label={`Select all in ${group.label}`}
+                    checked={selectedCount === items.length}
+                    ref={node => {
+                      if (node) node.indeterminate =
+                        selectedCount > 0 && selectedCount < items.length;
+                    }}
+                    onChange={() => toggleGroupSelection(items)}
+                    className="ml-3 shrink-0 w-4 h-4 accent-blue-500"
+                  />
+                )}
+              <button
+                type="button"
+                aria-expanded={expanded}
+                onClick={() => setExpandedGroups((previous) => ({
+                  ...previous,
+                  [group.id]: !expanded,
+                }))}
+                className={`w-full flex items-center gap-2 px-3 py-2 font-bold italic text-neutral-300 hover:text-neutral-100 ${mobile ? "text-base" : "text-sm"}`}
+              >
+                <span className="w-3 text-center">{expanded ? "▾" : "▸"}</span>
+                <span>{group.label}</span>
+                <span className="ml-auto font-normal text-neutral-500">{items.length}</span>
+              </button>
+              </div>
+
+              {expanded && items.map((chat) => (
           <div
             key={chat.id}
-            onClick={() => renamingId !== chat.id && onSelectChat(chat.id)}
+            onClick={() => selectionMode ? toggleSelection(chat.id) : renamingId !== chat.id && onSelectChat(chat.id)}
             className={`group flex items-center gap-1.5 px-3 rounded-lg cursor-pointer ${mobile ? "py-3.5 text-base" : "py-2 text-sm"} ${
               chat.id === activeChatId ? "bg-neutral-800" : "hover:bg-neutral-800/60"
             }`}
           >
+            {selectionMode && (
+              <input
+                type="checkbox"
+                aria-label={`Select ${chat.title}`}
+                checked={selectedIds.has(chat.id)}
+                onChange={() => toggleSelection(chat.id)}
+                onClick={e => e.stopPropagation()}
+                className="shrink-0 w-4 h-4 accent-blue-500"
+              />
+            )}
             {chat.pinned && (
               <svg
                 width="14"
@@ -147,15 +488,18 @@ export default function Sidebar({
             ) : (
               <span className="flex-1 truncate">{chat.title}</span>
             )}
-            <button
+            {!selectionMode && <button
               onClick={(e) => openMenu(e, chat.id)}
               className={`opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 shrink-0 hover:bg-neutral-700 rounded text-neutral-300 ${mobile ? "p-2 -mr-2" : "p-0.5"}`}
               title={t("sidebar.menu")}
             >
               <MenuIcon className="w-4 h-4" />
-            </button>
+            </button>}
           </div>
-        ))}
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {/* User + sign out (bottom) */}
@@ -209,6 +553,13 @@ export default function Sidebar({
               {menuChat.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
             </button>
             <button
+              type="button"
+              className="block w-full text-left px-3 py-1.5 hover:bg-neutral-700"
+              onClick={() => archiveSingleChat(menu.id, !menuChat.archived)}
+            >
+              {menuChat.archived ? "Unarchive" : "Archive"}
+            </button>
+            <button
               className="block w-full text-left px-3 py-1.5 hover:bg-neutral-700"
               onClick={async () => {
                 await onCopyChat(menu.id);
@@ -232,6 +583,48 @@ export default function Sidebar({
             </button>
           </div>
         </>
+      )}
+
+      {confirmBulkDelete && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4"
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bulk-delete-title"
+            aria-describedby="bulk-delete-description"
+            className="w-full max-w-sm rounded-xl bg-neutral-900 p-5 text-neutral-100 shadow-2xl"
+          >
+            <h2 id="bulk-delete-title" className="text-lg font-bold">
+              Delete conversations?
+            </h2>
+            <p id="bulk-delete-description" className="mt-3 text-sm text-neutral-300">
+              Permanently delete {selectedIds.size} selected
+              {selectedIds.size === 1 ? " conversation" : " conversations"}?
+              This cannot be undone.
+            </p>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={bulkDeleting}
+                onClick={() => setConfirmBulkDelete(false)}
+                className="rounded-lg px-3 py-2 text-sm hover:bg-neutral-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={bulkDeleting}
+                onClick={executeBulkDelete}
+                className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {bulkDeleting ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,10 +1,22 @@
 # Max
 
-Max is an independent downstream fork of [Calivi](https://github.com/orkun-soylu/calivi).
+Max is a personal, opinionated fork of [Calivi](https://github.com/orkun-soylu/calivi), developed for practical local AI on modest hardware. Its maintainer selects components for usefulness, speed, low resource consumption, and straightforward operation rather than breadth of integrations.
 
-Max keeps useful parts of Calivi while developing its own UI, retrieval, tooling, context management, and local-AI workflow.
+The reference installation runs on **Ubuntu Linux with an NVIDIA RTX 3060 Laptop GPU (6 GB VRAM) and 16 GB system RAM**. It uses quantized models in the approximately **20B–80B parameter range**, with **Qwen3.6-35B-A3B APEX running on Buun** as the default.
 
-> **Current status:** Max has been rebased onto Calivi v0.6.5. The current Calivi UI is now the foundation for Max's UI development. The previous Max-specific mobile UI and OpenDyslexic integration were deliberately left behind during the rebase and will be rebuilt on this newer foundation.
+These models are not necessarily fully GPU-resident. Quantization and CPU offloading are important to running them on this hardware. This configuration may be useful to others building local assistants on similarly constrained systems.
+
+Max is based on Calivi v0.6.5 and adds its own interface, conversation management, execution tools, retrieval, and local-model workflow improvements.
+
+## Reference architecture
+
+- **Inference:** Buun serving Qwen3.6-35B-A3B APEX through an OpenAI-compatible endpoint. The inference server and model weights are managed separately from Max.
+- **Execution:** OpenHands agent-server in Docker, with a persistent workspace and five tools: `sandbox_exec`, `sandbox_edit`, `sandbox_write`, `sandbox_read`, and `sandbox_ls`.
+- **Retrieval:** Custom `web_search` with enhanced snippets and `web_fetch` for readable page content. The host-side search service uses DuckDuckGo with Brave fallback, Camoufox, and Mozilla Readability.
+- **Application:** Python backend, React frontend, bundled SearXNG, and Docker Compose.
+- **Interface:** Desktop and mobile chat UI with grouped conversations, pinned chats, multi-selection, and archiving.
+
+Sandbox operations intentionally run without per-call approval. They execute inside the OpenHands container, not directly on the host.
 
 ## Current stack
 
@@ -22,13 +34,12 @@ Max keeps useful parts of Calivi while developing its own UI, retrieval, tooling
 
 ## Requirements
 
-* Linux
-* Docker and Docker Compose
-* Python 3
-* A local OpenAI-compatible model endpoint
-* Camoufox for the local search service
-
-Max is designed around a local/self-hosted setup. External model providers are not required.
+- Linux (Ubuntu is the reference platform)
+- Docker Engine and Docker Compose (`docker-compose` is used by `max.sh`)
+- Python 3.13 for the host-side search service
+- An OpenAI-compatible inference endpoint or supported Ollama server
+- Camoufox, installed by `search_service/setup.sh`
+- Sufficient resources for the chosen inference model; model weights and inference software are not bundled
 
 ## Installation
 
@@ -41,9 +52,19 @@ cd Max
 
 Copy the example environment file:
 
-```bash
-cp .env.example .env
-```
+    cp .env.example .env
+
+Generate a persistent session/encryption key:
+
+    openssl rand -hex 32
+
+Put the generated value in `CALIVI_SECRET_KEY` inside `.env`. Keep it private and backed up separately from the application database. Do not regenerate it on subsequent starts.
+
+Optionally configure per-model system prompts:
+
+    cp config/system_prompts.example.yml config/system_prompts.yml
+
+This file is Git-ignored. Max can start without it.
 
 Install the search-service environment:
 
@@ -51,13 +72,25 @@ Install the search-service environment:
 ./search_service/setup.sh
 ```
 
+Build the Docker images:
+
+    docker-compose build
+
 Start Max:
 
-```bash
-./max.sh start
-```
+    ./max.sh start
 
-The frontend is available on the configured Calivi port.
+The frontend is available at `http://localhost:8090` with the default `CALIVI_PORT`.
+
+The default Compose stack includes the frontend, backend, SearXNG, and OpenHands sandbox. The host-side search service is managed by `max.sh`.
+
+Configure your model endpoint through Max's server settings. **Buun, the inference model, and its weights are external dependencies**, not installed by this repository.
+
+The OpenHands workspace persists in the `openhands-workspace` Docker volume. Sandbox commands and file operations run autonomously inside the container. The container is not network-disconnected and should not be treated as a complete security boundary against malicious code.
+
+The optional stdio MCP bridge requires copying `stdio-bridge/servers.example.json` to `stdio-bridge/servers.json`, editing it, and enabling the `stdio-bridge` Compose profile. It is not needed for OpenHands.
+
+The reference hardware describes one working installation, not a minimum specification. Fresh-clone deployment on other hardware has not yet been independently validated.
 
 ## Environment
 

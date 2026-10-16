@@ -231,11 +231,11 @@ def build_stream_response(
         # user-defined persona prompt are merged into a single system message (some backends
         # only honour the first system message).
         system_parts = []
-        if has_untrusted:
-            system_parts.append(UNTRUSTED_GUARD)
         persona_prompt = get_system_prompt(model)
         if persona_prompt:
             system_parts.append(persona_prompt)
+        if has_untrusted:
+            system_parts.append(UNTRUSTED_GUARD)
         # calivi-vm: the machine notes (#110), whenever this turn can operate the machine. Only
         # the owner is ever offered the host tools, so only the owner's turns read them.
         if privileged and host.offered(tools_spec):
@@ -523,6 +523,17 @@ def update_chat(
         chat.title = payload.title
     if payload.pinned is not None:
         chat.pinned = payload.pinned
+    if payload.archived is not None:
+        chat.archived = payload.archived
+        if (
+            payload.title is None
+            and payload.pinned is None
+            and payload.context_mode is None
+            and payload.mode is None
+        ):
+            # Archive-only changes must not count as chat activity.
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(chat, "updated_at")
     if payload.context_mode is not None:
         chat.context_mode = payload.context_mode
     if payload.mode is not None:
@@ -593,6 +604,9 @@ async def send_message(
     if chat.title == "New Chat":
         chat.title = payload.content[:60]
     db.commit()
+    print(f"[VISION-CHAT] images={len(payload.images or [])}", flush=True)
+    if payload.images:
+        print(f"[VISION-CHAT] first={payload.images[0][:80]}", flush=True)
     history.append({"role": "user", "content": payload.content, "images": payload.images, "attachments": atts})
 
     return build_stream_response(

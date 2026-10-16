@@ -52,6 +52,7 @@ SECRET_KEY_OLD = os.environ.get("CALIVI_SECRET_KEY_OLD", "")
 
 # Bundled SearXNG (the calivi-searxng service in docker-compose). Not exposed externally.
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://calivi-searxng:8080")
+SANDBOX_BASE_URL = os.environ.get("SANDBOX_BASE_URL", "http://openhands-sandbox:8000")
 
 OLLAMA_PROBE_TIMEOUT = 2.0
 

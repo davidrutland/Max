@@ -6,8 +6,18 @@ enabled: true
 # Raised from 5 when MCP landed: a single Context7 lookup already costs two turns
 # (resolve-library-id → query-docs) and the last turn is spent forcing a final answer, so 5
 # left almost no room for the model to consult a second source before running out.
-max_iterations: 8
+max_iterations: 64
 tools:
   web_search:
     enabled: true
-    num_results: 5
+    num_results: 10
+  sandbox_exec:
+    enabled: true
+  sandbox_edit:
+    enabled: true
+  sandbox_write:
+    enabled: true
+  sandbox_read:
+    enabled: true
+  sandbox_ls:
+    enabled: true

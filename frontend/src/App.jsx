@@ -172,6 +172,52 @@ export default function App() {
     await refreshChats();
   }
 
+  async function handleBulkDeleteChats(ids) {
+    const failedIds = [];
+    let deletedActiveChat = false;
+
+    for (const id of ids) {
+      try {
+        await api.deleteChat(id);
+        if (id === activeChatId) deletedActiveChat = true;
+      } catch (error) {
+        console.error("Failed to delete chat", id, error);
+        failedIds.push(id);
+      }
+    }
+
+    if (deletedActiveChat) {
+      setActiveChatId(null);
+      setActiveChat(null);
+    }
+
+    await refreshChats();
+    return failedIds;
+  }
+
+  async function handleBulkArchiveChats(ids, archived) {
+    const failedIds = [];
+
+    for (const id of ids) {
+      try {
+        await api.updateChat(id, { archived });
+      } catch (error) {
+        console.error("Failed to update chat archive status", id, error);
+        failedIds.push(id);
+      }
+    }
+
+    let refreshFailed = false;
+    try {
+      await refreshChats();
+    } catch (error) {
+      console.error("Failed to refresh chats after archive operation", error);
+      refreshFailed = true;
+    }
+
+    return { failedIds, refreshFailed };
+  }
+
   async function handleRenameChat(id, title) {
     await api.updateChat(id, { title });
     await refreshChats();
@@ -240,6 +286,8 @@ export default function App() {
         onSelectChat={openChat}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
+        onBulkDeleteChats={handleBulkDeleteChats}
+        onBulkArchiveChats={handleBulkArchiveChats}
         onRenameChat={handleRenameChat}
         onTogglePin={handleTogglePin}
         onCopyChat={handleCopyChat}

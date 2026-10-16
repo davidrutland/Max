@@ -1,5 +1,30 @@
 ## Max
 
+### 2026-10-16 — OpenHands integration and chat management
+
+#### Added
+
+- OpenHands agent-server as a default Compose service, with persistent workspace storage and resource limits.
+- Five sandbox tools: `sandbox_exec`, `sandbox_edit`, `sandbox_write`, `sandbox_read`, and `sandbox_ls`. Sandbox operations intentionally do not require per-call approval.
+- Archive and restore operations, including bulk archive/unarchive and a collapsed Archived accordion.
+- Multi-chat selection, age-based conversation groups, and a separate Pinned group.
+- Backend archive/migration regression tests and frontend chat-management/mobile-navigation tests.
+
+#### Changed
+
+- Improved desktop and mobile chat navigation, including mobile list/chat switching.
+- Updated conversation-list controls, accordion styling, and selection behaviour.
+- Documented the low-resource reference installation and external inference dependencies.
+- Retained custom search with enhanced snippets and readable page fetching.
+
+#### Deployment
+
+- Reference hardware: 6 GB VRAM and 16 GB system RAM, running quantized models in the approximately 20B–80B range.
+- Default reference model: Qwen3.6-35B-A3B APEX on Buun.
+- Model weights and inference software are external to the Docker Compose stack.
+- Sandbox execution is container-based, not network-isolated.
+- Back up SQLite data and the persistent session/encryption key before upgrading.
+
 ### 2026-10-01 — Rebase onto Calivi v0.6.5
 
 ### Changed

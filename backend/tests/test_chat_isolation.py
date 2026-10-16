@@ -53,6 +53,22 @@ async def test_outsider_cannot_modify_the_chat(two_users):
     assert (await owner.get(f"/api/chats/{chat_id}")).json()["title"] == "Secret"
 
 
+
+async def test_outsider_cannot_archive_or_restore_the_chat(two_users):
+    owner, outsider, chat_id = two_users
+
+    for archived in (True, False):
+        response = await outsider.patch(
+            f"/api/chats/{chat_id}",
+            json={"archived": archived},
+        )
+        assert response.status_code == 404
+
+    detail = await owner.get(f"/api/chats/{chat_id}")
+    assert detail.status_code == 200
+    assert detail.json()["archived"] is False
+
+
 async def test_outsider_cannot_delete_the_chat(two_users):
     owner, outsider, chat_id = two_users
     assert (await outsider.delete(f"/api/chats/{chat_id}")).status_code == 404

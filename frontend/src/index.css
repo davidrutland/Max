@@ -105,6 +105,11 @@ html {
   border-width: 0 !important;
 }
 
+/* Explicit border for the chat Select button. */
+.max-select-button {
+  border-width: 1px !important;
+}
+
 /* Shared themed scrollbar (message area + config editor): fixed 10px, slim thumb. */
 .themed-scroll::-webkit-scrollbar {
   width: 10px;

@@ -171,6 +171,7 @@ class ChatOut(BaseModel):
     id: int
     title: str
     pinned: bool = False
+    archived: bool = False
     mode: str = "chat"
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -179,6 +180,7 @@ class ChatOut(BaseModel):
 class ChatUpdate(BaseModel):
     title: str | None = None
     pinned: bool | None = None
+    archived: bool | None = None
     context_mode: Literal["compact", "full"] | None = None
     mode: Literal["chat", "agent"] | None = None
 

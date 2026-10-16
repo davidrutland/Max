@@ -18,7 +18,7 @@ vi.mock("./api.js", () => ({
   api: {
     getAuthConfig: vi.fn(async () => ({ registration_enabled: false })),
     getMe: vi.fn(async () => ({ id: 1, username: "u", role: "user" })),
-    listChats: vi.fn(async () => [{ id: 7, title: "Kyoto trip", pinned: false }]),
+    listChats: vi.fn(async () => [{ id: 7, title: "Kyoto trip", pinned: false, updated_at: new Date().toISOString() }]),
     listServers: vi.fn(async () => []),
     getChat: vi.fn(async () => chat),
   },

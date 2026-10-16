@@ -49,6 +49,8 @@ def _migrate():
         cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(chats)").fetchall()]
         if "pinned" not in cols:
             conn.exec_driver_sql("ALTER TABLE chats ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0")
+        if "archived" not in cols:
+            conn.exec_driver_sql("ALTER TABLE chats ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0")
         if "user_id" not in cols:
             # Existing (single-user) chats are attached to the super admin (id=1, the first sign-up).
             conn.exec_driver_sql("ALTER TABLE chats ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")

@@ -48,6 +48,46 @@ def _columns(table):
         return [row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()]
 
 
+def test_archive_migration_preserves_existing_chats():
+    """An existing chat survives the upgrade and defaults to unarchived."""
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        db.add(models.User(
+            id=1,
+            username="legacy",
+            email="legacy@test.local",
+            password_hash="unused",
+            role="admin",
+        ))
+        db.flush()  # Ensure the user exists before inserting the chat.
+        db.add(models.Chat(
+            id=42,
+            user_id=1,
+            title="Existing conversation",
+        ))
+        db.commit()
+
+    with engine.connect() as conn:
+        conn.exec_driver_sql("ALTER TABLE chats DROP COLUMN archived")
+        conn.commit()
+
+    assert "archived" not in _columns("chats")
+
+    _migrate()
+    _migrate()
+
+    assert _columns("chats").count("archived") == 1
+
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT id, title, archived FROM chats WHERE id = 42"
+        ).one()
+
+    assert tuple(row) == (42, "Existing conversation", 0)
+
+
+
 def test_migrate_adds_disabled_tools_to_a_pre_existing_table():
     _rebuild_legacy_table()
     assert "disabled_tools" not in _columns("mcp_servers")  # the deployed shape
