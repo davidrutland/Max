@@ -44,6 +44,7 @@ export default function App() {
     return n || null; // restore the last active chat after a refresh
   });
   const [activeChat, setActiveChat] = useState(null);
+  const [searchTarget, setSearchTarget] = useState(null); // {chatId, messageId, sequence}
   const [servers, setServers] = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -143,6 +144,12 @@ export default function App() {
     [isMobile]
   );
 
+  const searchSequenceRef = useRef(0);
+  function openSearchResult(chatId, messageId) {
+    // Sequence changes even when clicking the same result twice.
+    setSearchTarget({ chatId, messageId, sequence: ++searchSequenceRef.current });
+    openChat(chatId);
+  }
   function closeChat() {
     if (window.history.state?.caliviChat != null) window.history.back(); // → popstate below
     else setActiveChatId(null);
@@ -284,6 +291,7 @@ export default function App() {
         chats={chats}
         activeChatId={activeChatId}
         onSelectChat={openChat}
+        onSearchResult={openSearchResult}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
         onBulkDeleteChats={handleBulkDeleteChats}
@@ -300,6 +308,7 @@ export default function App() {
         <ChatView
           onBack={isMobile ? closeChat : undefined}
           chat={activeChat}
+          searchTarget={searchTarget?.chatId === activeChat.id ? searchTarget : null}
           servers={servers}
           hostTools={!!me?.host_tools}
           onMessageSent={handleMessageSent}

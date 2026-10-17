@@ -10,12 +10,12 @@ import { formatTs, tokensPerSecLabel } from "../../lib/format.js";
  * that field can be empty, and in that case the copy/delete buttons were not shown either —
  * the behaviour is preserved.
  */
-export default function MessageItem({ m, onEdit, onDelete, onImageClick, onInspect }) {
+export default function MessageItem({ m, onEdit, onDelete, onImageClick, onInspect, searchHighlighted = false }) {
   const isUser = m.role === "user";
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[88%] md:max-w-[70%] rounded-2xl px-4 py-2 ${
+        className={`max-w-[88%] md:max-w-[70%] rounded-2xl px-4 py-2 transition-shadow duration-700 ${searchHighlighted ? "ring-2 ring-amber-400/90" : ""} ${
           isUser ? "bg-accent text-white" : "bg-neutral-800 text-neutral-100"
         }`}
       >

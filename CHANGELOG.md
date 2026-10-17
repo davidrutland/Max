@@ -1,5 +1,30 @@
 ## Max
 
+### 2026-10-17 — Conversation search
+
+#### Added
+
+- Authenticated, user-scoped search across stored conversation messages.
+- Deterministic Boolean query parsing with `AND`, `OR`, `NOT`,
+  implicit AND, quoted phrases, parentheses, `+`, `-`, `|`,
+  and prefix wildcard matching.
+- Live sidebar search with debounced requests, matching message excerpts,
+  result counts, and independent scrolling.
+- Exact-message navigation from search results, including repeated jumps
+  within the same conversation.
+- Temporary message-bubble highlighting and a divider separating search
+  results from conversation groups.
+- Paginated `/api/search/messages` endpoint.
+- Search parser, API, frontend interaction, and navigation regression tests.
+
+#### Behaviour
+
+- Search is lexical and deterministic, without semantic or LLM matching.
+- Search does not load or switch inference-model contexts.
+- Closing search preserves the currently open conversation.
+- Desktop and mobile search behaviour verified in the running interface.
+- No database migration or FTS index is required by the initial implementation.
+
 ### 2026-10-16 — OpenHands integration and chat management
 
 #### Added

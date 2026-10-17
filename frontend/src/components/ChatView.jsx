@@ -14,7 +14,7 @@ import { useT } from "../i18n.js";
 
 /** Orchestrates the chat screen: combines the selected target (useServerModel), stream state
  * (useChatStream) and attachment/edit state; the rendering is done by child components. */
-export default function ChatView({ chat, servers, hostTools, onMessageSent, onForked, onOpenSettings, onBack }) {
+export default function ChatView({ chat, servers, hostTools, onMessageSent, onForked, onOpenSettings, onBack, searchTarget }) {
   const t = useT();
   const { serverId, model, setTarget, upServers, selectedServer } = useServerModel(servers);
   const stream = useChatStream();
@@ -322,6 +322,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
       <MessageList
         chat={chat}
+        searchTarget={searchTarget}
         edit={edit}
         upServers={upServers}
         stream={stream}

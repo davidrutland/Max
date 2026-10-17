@@ -24,6 +24,7 @@ function mount(chats, activeChatId = null) {
     activeChatId,
     mobile: false,
     onSelectChat: vi.fn(),
+    onSearchResult: vi.fn(),
     onNewChat: vi.fn(),
     onDeleteChat: vi.fn(),
     onBulkDeleteChats: vi.fn().mockResolvedValue([]),
@@ -616,5 +617,63 @@ describe("Sidebar chat accordions", () => {
     fireEvent.click(heading("Last 30 days"));
     expect(expanded("Last 30 days")).toBe(true);
     expect(screen.getByText("Chat 1")).toBeTruthy();
+  });
+});
+
+
+describe("Sidebar search entry (step 1)", () => {
+  test("Search matches Select styling and focuses the input immediately", () => {
+    mount([chat(1, 0.1)]);
+    const searchButton = screen.getByRole("button", { name: "Search" });
+    const selectButton = screen.getByRole("button", { name: "Select" });
+    expect(searchButton.className).toBe(selectButton.className);
+    expect(screen.queryByRole("searchbox", { name: "Search conversations" })).toBeNull();
+    fireEvent.click(searchButton);
+    const input = screen.getByRole("searchbox", { name: "Search conversations" });
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByText("Chat 1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+    expect(screen.queryByRole("searchbox", { name: "Search conversations" })).toBeNull();
+    expect(screen.getByText("Chat 1")).toBeTruthy();
+  });
+});
+
+
+describe("Sidebar search results (step 2)", () => {
+  test("shows debounced results above conversation groups, then Back restores the list", async () => {
+    const { api } = await import("../api.js");
+    const spy = vi.spyOn(api, "searchMessages").mockResolvedValue({
+      total: 1, results: [{ message_id: 42, chat_id: 1, chat_title: "Driver diagnostics", content: "CUDA driver failed", role: "user", archived: false }],
+    });
+    try {
+      const view = mount([chat(1, 0.1)]);
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search conversations" }), { target: { value: "CUDA" } });
+      expect(spy).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(260); });
+      expect(spy).toHaveBeenCalledWith("CUDA", expect.objectContaining({ signal: expect.any(Object) }));
+      expect(screen.getByText("Driver diagnostics")).toBeTruthy();
+      expect(screen.getByText("CUDA driver failed")).toBeTruthy();
+      expect(screen.getByText("Chat 1")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Open search result from Driver diagnostics" }));
+      expect(view.props.onSearchResult).toHaveBeenCalledWith(1, 42);
+      fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+      expect(screen.queryByLabelText("Search results")).toBeNull();
+      expect(screen.getByText("Chat 1")).toBeTruthy();
+    } finally { spy.mockRestore(); }
+  });
+  test("ignores a late response after closing search", async () => {
+    const { api } = await import("../api.js");
+    let resolveRequest;
+    const spy = vi.spyOn(api, "searchMessages").mockImplementation(() => new Promise(resolve => { resolveRequest = resolve; }));
+    try {
+      mount([chat(1, 0.1)]);
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search conversations" }), { target: { value: "CUDA" } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(260); });
+      fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+      await act(async () => { resolveRequest({ total: 1, results: [{ message_id: 9, chat_id: 1, chat_title: "Stale result", content: "late" }] }); });
+      expect(screen.queryByText("Stale result")).toBeNull();
+    } finally { spy.mockRestore(); }
   });
 });

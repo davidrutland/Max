@@ -57,6 +57,9 @@ function normalizeTarget(serverId, model) {
 }
 
 export const api = {
+  // Conversation search (authenticated; abortable to discard stale requests)
+  searchMessages: (query, { signal, limit = 50, offset = 0 } = {}) =>
+    request(`/search/messages?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`, { signal }),
   // Auth
   getAuthConfig: () => request("/auth/config"),
   register: (data) => request("/auth/register", { method: "POST", body: JSON.stringify(data) }),

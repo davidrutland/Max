@@ -14,7 +14,7 @@ Max is based on Calivi v0.6.5 and adds its own interface, conversation managemen
 - **Execution:** OpenHands agent-server in Docker, with a persistent workspace and five tools: `sandbox_exec`, `sandbox_edit`, `sandbox_write`, `sandbox_read`, and `sandbox_ls`.
 - **Retrieval:** Custom `web_search` with enhanced snippets and `web_fetch` for readable page content. The host-side search service uses DuckDuckGo with Brave fallback, Camoufox, and Mozilla Readability.
 - **Application:** Python backend, React frontend, bundled SearXNG, and Docker Compose.
-- **Interface:** Desktop and mobile chat UI with grouped conversations, pinned chats, multi-selection, and archiving.
+- **Interface:** Desktop and mobile chat UI with grouped conversations, pinned chats, multi-selection, archiving, and full-history message search.
 
 Sandbox operations intentionally run without per-call approval. They execute inside the OpenHands container, not directly on the host.
 
@@ -125,6 +125,52 @@ The built-in `web_search` tool uses the configured `calivi-search` engine.
 `web_fetch` provides direct page retrieval through the local search service and is intended for fetching and extracting the contents of a specific URL.
 
 The search service runs separately from the Docker containers on port `8787` and is managed by `max.sh`.
+
+## Conversation search
+
+Max includes a deterministic search facility for finding messages across
+stored conversations. This is separate from the web-search and page-retrieval
+tools described above.
+
+Search supports:
+
+- Keywords and exact phrases in double quotes.
+- Boolean `AND`, `OR`, and `NOT`, including parentheses for grouping.
+- Implicit AND between adjacent terms.
+- `+` for required terms, `-` for exclusions, and `|` for OR.
+- Prefix wildcard matching and technical search terms containing punctuation.
+
+Search is lexical rather than semantic: it does not use an LLM to interpret
+queries or generate results.
+
+### Interface
+
+The sidebar Search control is available on desktop and mobile.
+
+- Results appear as the query is entered, after a short debounce.
+- Each result identifies its conversation and shows a matching message excerpt.
+- Results and the conversation list have independent scrolling areas.
+- Selecting a result opens its conversation and jumps to the exact message.
+- The selected message is temporarily highlighted.
+- Repeated jumps within an already-open conversation are supported.
+- Back closes search without changing the currently open conversation.
+
+### Implementation
+
+The authenticated backend endpoint is:
+
+`GET /api/search/messages?q=...&limit=50&offset=0`
+
+Results are scoped to conversations owned by the authenticated user.
+The response includes a total match count and paginated message-level
+results with conversation and message identifiers.
+
+The current implementation evaluates queries against stored messages using
+a user-scoped database scan. It does not require an FTS index or database
+migration.
+
+Conversation search does not call an inference model, load a model context,
+or activate a conversation's saved inference state.
 
 ## Managing Max
 

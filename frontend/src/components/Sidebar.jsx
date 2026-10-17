@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { MenuIcon, SettingsIcon } from "./icons.jsx";
+import { api } from "../api.js";
 import { useT } from "../i18n.js";
 
 const WIDTH_KEY = "calivi_sidebar_width";
@@ -35,6 +36,7 @@ export default function Sidebar({
   chats,
   activeChatId,
   onSelectChat,
+  onSearchResult,
   onNewChat,
   onDeleteChat,
   onBulkDeleteChats,
@@ -54,6 +56,13 @@ export default function Sidebar({
   const [expandedGroups, setExpandedGroups] = useState(() => ({ day: true }));
   const [now, setNow] = useState(() => Date.now());
   const [selectionMode, setSelectionMode] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const searchInputRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -61,6 +70,43 @@ export default function Sidebar({
   const [chatListStale, setChatListStale] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState("");
   const draggingRef = useRef(false);
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchTotal(0);
+      setSearchLoading(false);
+      setSearchError("");
+      return;
+    }
+    const controller = new AbortController();
+    setSearchLoading(true);
+    setSearchError("");
+    setSearchResults([]);
+    setSearchTotal(0);
+    const timer = setTimeout(async () => {
+      try {
+        const data = await api.searchMessages(searchQuery.trim(), { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (!data || !Array.isArray(data.results) || !Number.isInteger(data.total)) {
+          throw new Error("Invalid search response");
+        }
+        setSearchResults(data.results);
+        setSearchTotal(data.total);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setSearchError("Search failed. Please try again.");
+      } finally {
+        if (!controller.signal.aborted) setSearchLoading(false);
+      }
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchOpen, searchQuery]);
 
   // Drag to resize the width
   useEffect(() => {
@@ -312,7 +358,7 @@ export default function Sidebar({
     >
       {mobile ? (
         <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-          <div className="flex-1 text-lg font-semibold text-neutral-100">Calivi</div>
+          <div className="flex-1 text-lg font-semibold text-neutral-100">Max</div>
           <button
             onClick={onNewChat}
             title={t("sidebar.newChat")}
@@ -341,6 +387,14 @@ export default function Sidebar({
 
       <div className="shrink-0 px-3 pb-2" inert={bulkDeleting || bulkArchiving || chatListStale ? "" : undefined}>
         {!selectionMode ? (
+          <div className="flex items-center gap-2">
+          <button type="button"
+            aria-label="Search"
+            aria-expanded={searchOpen}
+            onClick={() => setSearchOpen(true)}
+            className="px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors">
+            Search
+          </button>
           <button type="button"
             onClick={() => {
               if (bulkDeleting || bulkArchiving || chatListStale) return;
@@ -351,6 +405,7 @@ export default function Sidebar({
             className="px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors">
             Select
           </button>
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-neutral-200">
             <span className="font-semibold">{selectedIds.size} selected</span>
@@ -393,12 +448,57 @@ export default function Sidebar({
         )}
       </div>
 
+      {searchOpen && (
+        <div className="shrink-0 px-3 pb-2 flex items-center gap-2">
+          <button type="button" aria-label="Back from search"
+            onClick={() => {
+              setSearchOpen(false);
+              setSearchQuery("");
+            }}
+            className="rounded-lg px-2 py-1.5 text-neutral-200 hover:bg-neutral-800">
+            ←
+          </button>
+          <input ref={searchInputRef} type="search" aria-label="Search conversations"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search conversations…"
+            className="min-w-0 flex-1 rounded-lg border border-solid border-current bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-300" />
+        </div>
+      )}
+      {searchOpen && searchQuery.trim() && (
+        <div aria-label="Search results" className="shrink-0 px-3 pb-2 max-h-[40vh] overflow-y-auto themed-scroll space-y-1">
+          {searchLoading && <p role="status" className="text-sm text-neutral-400">Searching…</p>}
+          {searchError && <p role="alert" className="text-sm text-red-400">{searchError}</p>}
+          {!searchLoading && !searchError && (
+            <>
+              <p className="text-xs text-neutral-400">{searchTotal} matching messages{searchTotal > searchResults.length ? ` (showing ${searchResults.length})` : ""}</p>
+              {searchResults.map((result) => (
+                <button key={result.message_id} type="button"
+                  aria-label={`Open search result from ${result.chat_title || "Untitled conversation"}`}
+                  onClick={() => onSearchResult(result.chat_id, result.message_id)}
+                  className="w-full rounded-lg p-2 text-left text-sm text-neutral-200 hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-300">
+                  <span className="block truncate font-semibold">{result.chat_title || "Untitled conversation"}</span>
+                  <span className="block text-xs text-neutral-400 line-clamp-3 break-words">{String(result.content || "").slice(0, 240)}</span>
+                  <span className="block text-xs text-neutral-500">{result.role === "user" ? "You" : "Assistant"}{result.archived ? " · Archived" : ""}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+      {searchOpen && searchQuery.trim() && (
+        <div role="separator" aria-label="Search results divider"
+          className="shrink-0 mx-3 my-2 border-t border-solid border-neutral-600" />
+      )}
       {bulkDeleteError && (
         <div role="alert" className="shrink-0 px-3 pb-2 text-sm text-red-400">
           {bulkDeleteError}
         </div>
       )}
 
+      {searchOpen && searchQuery.trim() && (
+        <div aria-hidden="true" className="shrink-0 mx-3 my-2 h-px bg-neutral-500/70" />
+      )}
       <div className="flex-1 overflow-y-auto themed-scroll px-3 space-y-1" inert={bulkDeleting || bulkArchiving || chatListStale ? "" : undefined}>
         {CHAT_GROUPS.map((group) => {
           const items = groupedChats[group.id];

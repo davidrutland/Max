@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Markdown from "../Markdown.jsx";
 import MessageItem from "./MessageItem.jsx";
 import MessageEditor from "./MessageEditor.jsx";
@@ -15,6 +15,7 @@ export const STICK_THRESHOLD_PX = 32;
 /** The message stream: persisted messages + the optimistic user bubble + live stream indicators. */
 export default function MessageList({
   chat,
+  searchTarget,
   edit,
   upServers,
   stream,
@@ -27,6 +28,9 @@ export default function MessageList({
 }) {
   const t = useT();
   const scrollRef = useRef(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  const highlightTimerRef = useRef(null);
+  const lastJumpRef = useRef(null);
   // Follow new output only while the user is at the bottom. The list used to scroll to the end on
   // every streamed token, so scrolling up to read a long answer was undone mid-sentence.
   const stickRef = useRef(true);
@@ -53,7 +57,7 @@ export default function MessageList({
   // Opening a chat or sending a message means "take me to the end" again. A finishing answer
   // (pending.user back to null) does not: the user may be reading further up.
   useEffect(() => {
-    stickRef.current = true;
+    stickRef.current = !(searchTarget && searchTarget.chatId === chat?.id);
   }, [chat?.id]);
   useEffect(() => {
     if (pending.user !== null) stickRef.current = true;
@@ -69,6 +73,27 @@ export default function MessageList({
     }
   }, [chat?.messages, streaming, thinking, pending.user, timeline]);
 
+  // Jump only after the requested conversation's messages have actually rendered.
+  // Never call scrollIntoView: that can scroll the entire page/sidebar on mobile.
+  useEffect(() => {
+    if (!searchTarget || searchTarget.chatId !== chat?.id) return;
+    if (lastJumpRef.current === searchTarget.sequence) return;
+    if (!chat?.messages?.some(m => m.id === searchTarget.messageId)) return;
+    const container = scrollRef.current;
+    const node = Array.from(container?.querySelectorAll('[data-search-message-id]') || [])
+      .find(el => el.dataset.searchMessageId === String(searchTarget.messageId));
+    if (!container || !node) return;
+    lastJumpRef.current = searchTarget.sequence;
+    stickRef.current = false;
+    const containerRect = container.getBoundingClientRect();
+    const messageRect = node.getBoundingClientRect();
+    container.scrollTop += messageRect.top - containerRect.top - 24;
+    autoTopRef.current = container.scrollTop;
+    setHighlightedMessageId(searchTarget.messageId);
+    clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedMessageId(null), 5000);
+  }, [chat?.id, chat?.messages, searchTarget]);
+  useEffect(() => () => clearTimeout(highlightTimerRef.current), []);
   return (
     <div className="relative flex-1 min-h-0">
       <div
@@ -77,7 +102,9 @@ export default function MessageList({
         className="themed-scroll h-full overflow-y-auto px-3 py-4 md:px-6 md:py-6 space-y-4"
       >
         {chat?.messages.map((m) => [
-          m.role === "user" && edit.editingId === m.id ? (
+          <div key={`message-${m.id}`} data-search-message-id={m.id}
+            className="">
+          {m.role === "user" && edit.editingId === m.id ? (
             <MessageEditor
               key={m.id}
               content={edit.content}
@@ -93,12 +120,14 @@ export default function MessageList({
             <MessageItem
               key={m.id}
               m={m}
+              searchHighlighted={highlightedMessageId === m.id}
               onEdit={() => onStartEdit(m)}
               onDelete={() => onDeleteMessage(m.id)}
               onImageClick={onImageClick}
               onInspect={onInspect}
             />
-          ),
+          )}
+          </div>,
           // Where the model's verbatim context starts: everything above is only in the summary.
           summarisedUpto === m.id && (
             <div key={`summary-${m.id}`} className="flex items-center gap-3 text-xs text-neutral-500">
