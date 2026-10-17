@@ -8,6 +8,8 @@ These models are not necessarily fully GPU-resident. Quantization and CPU offloa
 
 Max is based on Calivi v0.6.5 and adds its own interface, conversation management, execution tools, retrieval, and local-model workflow improvements.
 
+![Max desktop web interface](docs/images/max-screenshot.png)
+
 ## Reference architecture
 
 - **Inference:** Buun serving Qwen3.6-35B-A3B APEX through an OpenAI-compatible endpoint. The inference server and model weights are managed separately from Max.
