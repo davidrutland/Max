@@ -87,18 +87,28 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer = null;
     setContextStatus(null);
     const chatId = chat.id;
-    api.getContextStatus(chatId)
-      .then((status) => {
+
+    async function loadStatus() {
+      try {
+        const status = await api.getContextStatus(chatId);
         if (!cancelled && contextChatIdRef.current === chatId) {
           setContextStatus({ ...status, chatId });
         }
-      })
-      .catch((error) => {
-        if (!cancelled) stream.flashError(error.message);
-      });
-    return () => { cancelled = true; };
+      } catch (error) {
+        if (!cancelled) {
+          retryTimer = setTimeout(loadStatus, 2000);
+        }
+      }
+    }
+
+    loadStatus();
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
   }, [chat?.id]);
 
   const [input, setInput] = useState("");
