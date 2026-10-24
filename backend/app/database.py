@@ -63,6 +63,20 @@ def _migrate():
         if "mode" not in cols:
             conn.exec_driver_sql("ALTER TABLE chats ADD COLUMN mode VARCHAR(10) NOT NULL DEFAULT 'chat'")
 
+        # Old bindings have unknown tool contracts. NULL must fail closed rather
+        # than pretending that an existing snapshot was created with no tools.
+        binding_tables = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_context_bindings'"
+        ).fetchall()
+        if binding_tables:
+            binding_cols = {row[1] for row in conn.exec_driver_sql(
+                "PRAGMA table_info(chat_context_bindings)"
+            ).fetchall()}
+            if "tool_fingerprint" not in binding_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE chat_context_bindings ADD COLUMN tool_fingerprint VARCHAR(64)"
+                )
+
         # Create the single settings row if absent (registration open by default).
         conn.exec_driver_sql(
             "INSERT INTO settings (id, registration_enabled) VALUES (1, 1) "

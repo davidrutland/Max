@@ -1,5 +1,34 @@
 ## Max
 
+### 2026-10-24 — Buun SSD-backed conversation persistence
+
+#### Why
+
+- On constrained hardware, rebuilding a long conversation's KV cache can require a lengthy prompt prefill. After an inference-server restart or host reboot, ordinary in-memory prompt caches are lost and previously visited conversations otherwise require another prefill.
+- Added SSD-backed KV checkpoints to reduce repeated prefill work when returning to existing conversations. Stored messages remain authoritative; checkpoints are reusable accelerators, not the conversation record.
+
+#### Added
+
+- Buun-backed slot checkpoint save/restore and conversation-to-checkpoint binding, with support for router-managed model selection and the configured inference server.
+- Persistence configuration and snapshot-directory mounts through `.env` / `.env.example` and Compose, including `CONTEXT_PERSISTENCE_MODE`, `BUUN_CONTEXT_URL`, `BUUN_CONTEXT_MODEL`, `BUUN_BACKEND_IDENTITY`, `BUUN_CONTEXT_SERVER_ID`, and `BUUN_SLOT_SAVE_PATH`.
+- Compatibility checks for changes in model name, system prompt, or available tools, with **Continue / Fork / Cancel** confirmation rather than forced forks.
+- Model readiness and loading controls, persistence settings UI, and regression coverage for checkpoint lifecycle, switching, streaming, editing, and deletion.
+
+#### Behaviour
+
+- **Continue** rebuilds context under the current configuration and replaces the previous checkpoint; **Fork** creates a separate conversation with independent checkpoint ownership; **Cancel** leaves the conversation unchanged.
+- Missing or invalidated checkpoints are reconstructed from database history through the normal generation path.
+- Editing or deleting user or assistant messages invalidates affected checkpoint state; subsequent generation follows the normal send/streaming path, without a separate history-rewrite prefill system.
+- With persistence disabled, normal non-persistent chat and model selection remain available; changes invalidate stale checkpoint bindings so that re-enabling persistence does not restore outdated context.
+- Model identity is intentionally name-based. `BUUN_BACKEND_IDENTITY` is an administrator-defined stable identifier, not a model fingerprint. Administrators must keep model names and backend compatibility consistent.
+
+#### Backend support and validation
+
+- Buun is the only supported backend for SSD persistence at present, using slot saving alongside KV compression. Other backends may be considered if they provide comparable functionality with better performance.
+- Reference Buun revision: `b9637-3589-gd2407c33f` (`d2407c33f9595d1badccfd9a82a33c4c5ceda490`).
+- Live checks confirmed persistent edit/regenerate/continue, deletion, assistant-message editing, disabled-mode generation, and returning from disabled to automatic persistence. Router mode was used for live validation; direct-mode SSD integration was not separately verified.
+- Regression runs on the reference machine: **717 backend tests passed** (excluding the previously parked history-rewrite test file) and **146 frontend tests passed**. Three known history-rewrite assertions remain parked; these results are not a claim that every backend test passes.
+
 ### 2026-10-17 — Conversation search
 
 #### Added

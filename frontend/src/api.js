@@ -78,6 +78,12 @@ export const api = {
   getSettings: () => request("/settings"),
   updateSettings: (data) => request("/settings", { method: "PATCH", body: JSON.stringify(data) }),
 
+  selectRouterModel: (model) =>
+    request("/router/select", {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
+
   listServers: () => request("/servers"),
   addServer: (data) => request("/servers", { method: "POST", body: JSON.stringify(data) }),
   updateServer: (id, data) => request(`/servers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -104,6 +110,40 @@ export const api = {
   listChats: () => request("/chats"),
   createChat: () => request("/chats", { method: "POST", body: JSON.stringify({ title: "New Chat" }) }),
   getChat: (id) => request(`/chats/${id}`),
+  initializeChatContext: (id, payload) =>
+    request(`/chats/${id}/context/initialize`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: payload.content,
+        images: payload.images || [],
+        attachments: payload.attachments || [],
+        use_tools: !!payload.useTools,
+        ask_every_tool: !!payload.askEveryTool,
+        continue_original: !!payload.continueOriginal,
+        ...normalizeTarget(payload.serverId, payload.model),
+      }),
+    }),
+  checkContextCompatibility: (id, payload) =>
+    request(`/chats/${id}/context/compatibility`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: payload.content,
+        images: payload.images || [],
+        attachments: payload.attachments || [],
+        use_tools: !!payload.useTools,
+        ask_every_tool: !!payload.askEveryTool,
+        continue_original: !!payload.continueOriginal,
+        ...normalizeTarget(payload.serverId, payload.model),
+      }),
+    }),
+  forkConversation: (id, { serverId, model }) =>
+    request(`/chats/${id}/fork-conversation`, {
+      method: "POST",
+      body: JSON.stringify(normalizeTarget(serverId, model)),
+    }),
+  getContextStatus: (chatId) => request(`/chats/context/status?chat_id=${encodeURIComponent(chatId)}`),
+  activateChatContext: (id) =>
+    request(`/chats/${id}/context/activate`, { method: "POST" }),
   updateChat: (id, data) => request(`/chats/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteChat: (id) => request(`/chats/${id}`, { method: "DELETE" }),
   deleteMessage: (chatId, messageId) => request(`/chats/${chatId}/messages/${messageId}`, { method: "DELETE" }),
@@ -118,7 +158,7 @@ export const api = {
     return resp.json();
   },
 
-  async sendMessage(chatId, { content, images, attachments, serverId, model, useTools, askEveryTool, signal }, onPiece) {
+  async sendMessage(chatId, { content, images, attachments, serverId, model, useTools, askEveryTool, continueOriginal, confirmConfigurationChange, signal }, onPiece) {
     const resp = await fetch(`${BASE}/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -129,6 +169,8 @@ export const api = {
         attachments: attachments || [],
         use_tools: !!useTools,
         ask_every_tool: !!askEveryTool,
+        continue_original: !!continueOriginal,
+        confirm_configuration_change: !!confirmConfigurationChange,
         ...normalizeTarget(serverId, model),
       }),
       signal,
@@ -149,6 +191,13 @@ export const api = {
     });
     await streamNdjson(resp, onPiece);
   },
+
+  // Assistant edits change saved history without generating another assistant reply.
+  editAssistantMessage: (chatId, messageId, content, serverId, model, useTools) =>
+    request(`/chats/${chatId}/messages/${messageId}`, {
+      method: "PUT",
+      body: JSON.stringify({ content, use_tools: !!useTools, ...normalizeTarget(serverId, model) }),
+    }),
 
   // Summarise the older messages into the chat's context summary (#62). Streams like a reply:
   // {type:"content"|"thinking"} while it writes, then {type:"compacted"} or {type:"error"}.

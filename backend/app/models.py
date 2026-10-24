@@ -134,3 +134,28 @@ class Message(Base):
     timestamp: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
+
+
+class ChatContextBinding(Base):
+    """Per-chat persistence ownership; absent for pre-existing legacy chats.
+
+    Router alias and connection port do not establish model identity.
+    Identity immutability is enforced by application policy in a later patch.
+    """
+    __tablename__ = "chat_context_bindings"
+
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"), primary_key=True)
+    backend_identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    router_alias: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_path: Mapped[str] = mapped_column(Text, nullable=False)
+    model_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    mmproj_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mmproj_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_identity: Mapped[str] = mapped_column(String(255), nullable=False)
+    backend_build: Mapped[str] = mapped_column(String(255), nullable=False)
+    runtime_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
+    effective_system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    snapshot_path: Mapped[str | None] = mapped_column(String(1000), unique=True, nullable=True)
+    snapshot_status: Mapped[str] = mapped_column(String(20), nullable=False, default="absent")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

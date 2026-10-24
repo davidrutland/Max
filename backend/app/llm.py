@@ -88,7 +88,8 @@ def _without_images(m: dict) -> dict:
 
 
 async def stream_chat(
-    server: dict, model: str, messages: list[dict], tools: list[dict] | None = None
+    server: dict, model: str, messages: list[dict], tools: list[dict] | None = None,
+    *, cache_prompt: bool | None = None
 ) -> AsyncGenerator[dict, None]:
     """Streams a single model turn. When `tools` is given (native tool-calling) the model may
     request a tool; the clients then yield a `{"type":"tool_calls","calls":[...]}` piece
@@ -96,9 +97,15 @@ async def stream_chat(
     the tool."""
     messages = await _strip_images_if_not_vision(server, model, messages)
     if _is_openai(server):
-        gen = openai_client.stream_chat(
-            server.get("base_url") or "", server.get("api_key"), model, messages, tools=tools
-        )
+        if cache_prompt is None:
+            gen = openai_client.stream_chat(
+                server.get("base_url") or "", server.get("api_key"), model, messages, tools=tools
+            )
+        else:
+            gen = openai_client.stream_chat(
+                server.get("base_url") or "", server.get("api_key"), model, messages,
+                tools=tools, cache_prompt=cache_prompt
+            )
     else:
         gen = ollama_client.stream_chat(
             server.get("host") or "", server.get("port") or 11434, model, messages, tools=tools

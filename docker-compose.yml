@@ -39,6 +39,16 @@ services:
       # very large context windows. See ARCHITECTURE.md.
       - OLLAMA_CHAT_TIMEOUT=${OLLAMA_CHAT_TIMEOUT:-300}
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-15}
+      - CONTEXT_PERSISTENCE_MODE=${CONTEXT_PERSISTENCE_MODE:-disabled}
+      - CONTEXT_SNAPSHOT_TURN_INTERVAL=${CONTEXT_SNAPSHOT_TURN_INTERVAL:-10}
+      # Buun SSD context persistence; disabled until explicitly enabled in .env.
+      - BUUN_CONTEXT_URL=${BUUN_CONTEXT_URL:-}
+      - BUUN_CONTEXT_MODEL=${BUUN_CONTEXT_MODEL:-}
+      - BUUN_SLOT_SAVE_PATH=${CONTEXT_SNAPSHOT_CONTAINER_PATH:-/context-snapshots}
+      - BUUN_BACKEND_IDENTITY=${BUUN_BACKEND_IDENTITY:-}
+      - BUUN_CONTEXT_SERVER_ID=${BUUN_CONTEXT_SERVER_ID:-}
+      - MODEL_FILES_HOST_PATH=${MODEL_FILES_HOST_PATH:-}
+      - MODEL_FILES_CONTAINER_PATH=${MODEL_FILES_CONTAINER_PATH:-/model-files}
       # Conversation compaction: the estimated context size (tokens) at which the UI suggests
       # compacting a chat, and how many recent turns stay verbatim. Compaction itself is
       # always started by the user.
@@ -47,6 +57,13 @@ services:
     volumes:
       - calivi-data:/data
       - ./config:/config
+      # Optional in legacy mode; configure a shared Buun directory when enabled.
+      - type: bind
+        source: ${CONTEXT_SNAPSHOT_HOST_PATH:-./context-snapshots}
+        target: ${CONTEXT_SNAPSHOT_CONTAINER_PATH:-/context-snapshots}
+        read_only: false
+        bind:
+          create_host_path: true
     # `default` has to be listed explicitly: naming any network opts the service out of the
     # implicit one, which would cut it off from searxng and the frontend. `mcp-bridge` exists
     # whether or not the bridge profile is running, so this is harmless when it is not.

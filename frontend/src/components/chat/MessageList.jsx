@@ -104,7 +104,7 @@ export default function MessageList({
         {chat?.messages.map((m) => [
           <div key={`message-${m.id}`} data-search-message-id={m.id}
             className="">
-          {m.role === "user" && edit.editingId === m.id ? (
+          {edit.editingId === m.id ? (
             <MessageEditor
               key={m.id}
               content={edit.content}
@@ -113,7 +113,7 @@ export default function MessageList({
               onTargetChange={edit.setTarget}
               upServers={upServers}
               onCancel={edit.cancel}
-              onFork={edit.fork}
+              onFork={m.role === "user" ? edit.fork : undefined}
               onUpdate={edit.update}
             />
           ) : (

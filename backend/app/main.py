@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import CORS_ORIGINS
 from app.database import init_db
-from app.routers import servers, chats, config, extract, auth, users, mcp, search
+from app.routers import servers, chats, config, extract, auth, users, mcp, search, router_control
 from app.tools import mcp_client
+from app.context_startup import context_owner_lifespan
 
 
 @asynccontextmanager
@@ -16,7 +17,8 @@ async def lifespan(_app: FastAPI):
     # Connect to the configured MCP servers and register their tools. Best effort: an
     # unreachable server must not stop the app from booting.
     await mcp_client.sync_all()
-    yield
+    async with context_owner_lifespan():
+        yield
 
 
 app = FastAPI(title="Calivi", lifespan=lifespan)
@@ -37,6 +39,7 @@ app.include_router(config.router)
 app.include_router(extract.router)
 app.include_router(mcp.router)
 app.include_router(search.router)
+app.include_router(router_control.router)
 
 
 @app.get("/api/health")

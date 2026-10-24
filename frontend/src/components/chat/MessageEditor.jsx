@@ -29,13 +29,13 @@ export default function MessageEditor({
           <button onClick={onCancel} className="px-3 py-1 rounded-lg text-sm text-neutral-400 hover:bg-neutral-800">
             {t("common.cancel")}
           </button>
-          <button
+          {onFork && <button
             onClick={onFork}
             className="px-3 py-1 rounded-lg text-sm bg-neutral-700 hover:bg-neutral-600"
             title={t("chat.forkNewTitle")}
           >
             {t("chat.forkNew")}
-          </button>
+          </button>}
           <button onClick={onUpdate} className="px-3 py-1 rounded-lg text-sm bg-accent hover:bg-accent-hover">
             {t("chat.update")}
           </button>

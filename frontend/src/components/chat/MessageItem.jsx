@@ -58,6 +58,7 @@ export default function MessageItem({ m, onEdit, onDelete, onImageClick, onInspe
           <div className="flex items-center justify-between gap-3 mt-2 py-1.5 text-xs text-neutral-400">
             <div className="flex items-center gap-2">
               <CopyButton text={m.content} />
+              <EditButton onEdit={onEdit} />
               <DeleteButton onDelete={onDelete} />
             </div>
             <span>{tokensPerSecLabel(m)}</span>

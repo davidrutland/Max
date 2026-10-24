@@ -59,7 +59,7 @@ def _to_openai_msg(m: dict) -> dict:
     return {"role": m["role"], "content": m.get("content", "")}
 
 
-async def stream_chat(base_url: str, api_key: str | None, model: str, messages: list[dict], tools: list[dict] | None = None):
+async def stream_chat(base_url: str, api_key: str | None, model: str, messages: list[dict], tools: list[dict] | None = None, *, cache_prompt: bool | None = None):
     """Converts the OpenAI-compatible `/chat/completions` SSE stream into {"type","text"} pieces.
 
     When `tools` is given, `tools` and `tool_choice:"auto"` are added to the payload. If the
@@ -78,6 +78,10 @@ async def stream_chat(base_url: str, api_key: str | None, model: str, messages: 
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    if cache_prompt is not None:
+        if type(cache_prompt) is not bool:
+            raise TypeError("cache_prompt must be bool or None")
+        payload["cache_prompt"] = cache_prompt
 
     diag_id = uuid.uuid4().hex[:12]
     logging.getLogger("uvicorn.error").warning(

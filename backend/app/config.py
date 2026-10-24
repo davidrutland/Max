@@ -5,6 +5,30 @@ DB_PATH = os.environ.get("DB_PATH", "/data/calivi.db")
 SYSTEM_PROMPTS_PATH = os.environ.get("SYSTEM_PROMPTS_PATH", "/config/system_prompts.yml")
 SEARCH_CONFIG_PATH = os.environ.get("SEARCH_CONFIG_PATH", "/config/search.yml")
 TOOLS_CONFIG_PATH = os.environ.get("TOOLS_CONFIG_PATH", "/config/tools.yml")
+
+
+def parse_context_persistence_mode(value: str) -> str:
+    """Accept only documented modes; reject unsafe configuration."""
+    mode = value.strip().lower()
+    if mode not in ("auto", "disabled"):
+        raise ValueError("CONTEXT_PERSISTENCE_MODE must be 'auto' or 'disabled'")
+    return mode
+
+
+CONTEXT_PERSISTENCE_MODE = parse_context_persistence_mode(
+    os.environ.get("CONTEXT_PERSISTENCE_MODE", "disabled")
+)
+def parse_snapshot_turn_interval(value: str) -> int:
+    interval = int(value)
+    if interval < 1:
+        raise ValueError("CONTEXT_SNAPSHOT_TURN_INTERVAL must be >= 1")
+    return interval
+
+
+CONTEXT_SNAPSHOT_TURN_INTERVAL = parse_snapshot_turn_interval(
+    os.environ.get("CONTEXT_SNAPSHOT_TURN_INTERVAL", "10")
+)
+
 # The frontend and /api are served from the same origin (nginx proxy), so CORS never comes
 # into play in a normal deployment. This setting only matters when you run the backend
 # separately during development (vite dev server on :5173). Leave it empty to allow no

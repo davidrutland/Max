@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ServerModelPicker from "./ServerModelPicker.jsx";
+import ContextSettingsDialog from "./ContextSettingsDialog.jsx";
 import MessageList from "./chat/MessageList.jsx";
 import ToolOutputModal from "./chat/ToolOutputModal.jsx";
 import ContextBar from "./chat/ContextBar.jsx";
@@ -7,6 +8,7 @@ import Composer from "./chat/Composer.jsx";
 import { CompactIcon, SettingsIcon } from "./icons.jsx";
 import { useChatStream } from "../hooks/useChatStream.js";
 import { useServerModel } from "../hooks/useServerModel.js";
+import useModelReadiness from "../hooks/useModelReadiness.js";
 import { fileToScaledDataUrl } from "../lib/images.js";
 import { ASK_EVERY_TOOL_KEY, USE_TOOLS_KEY, loadAskEveryTool, loadUseTools } from "../lib/modelPrefs.js";
 import { api } from "../api.js";
@@ -14,13 +16,90 @@ import { useT } from "../i18n.js";
 
 /** Orchestrates the chat screen: combines the selected target (useServerModel), stream state
  * (useChatStream) and attachment/edit state; the rendering is done by child components. */
-export default function ChatView({ chat, servers, hostTools, onMessageSent, onForked, onOpenSettings, onBack, searchTarget }) {
+export default function ChatView({ chat, servers, hostTools, onMessageSent, onForked, onOpenSettings, onBack, searchTarget, forkDraft, onForkDraftConsumed }) {
   const t = useT();
   const { serverId, model, setTarget, upServers, selectedServer } = useServerModel(servers);
+  const [readinessRefresh, setReadinessRefresh] = useState(0);
+  const modelReadiness = useModelReadiness(model, true, readinessRefresh);
+  const [switchingModel, setSwitchingModel] = useState(false);
+
+  async function handleModelSelection(target) {
+    if (switchingModel || stream.sending) return;
+
+    if (target.serverId === serverId && target.model === model) return;
+
+    if (persistent && model && target.model !== model) {
+      if (!window.confirm(
+        `Switch from ${model} to ${target.model}? The current context will be saved.`
+      )) return;
+    }
+
+    setSwitchingModel(true);
+    try {
+      if (persistent) await api.selectRouterModel(target.model);
+      setTarget(target);
+    } catch (error) {
+      window.alert(`Model selection failed: ${error.message}`);
+    } finally {
+      setSwitchingModel(false);
+    }
+  }
+
+  async function loadSelectedModel() {
+    if (!model || switchingModel || stream.sending) return;
+    setSwitchingModel(true);
+    try {
+      await api.selectRouterModel(model);
+      setReadinessRefresh(value => value + 1);
+    } catch (error) {
+      window.alert(`Model loading failed: ${error.message}`);
+    } finally {
+      setSwitchingModel(false);
+    }
+  }
+
   const stream = useChatStream();
   const [inspecting, setInspecting] = useState(null); // tool output being read
   const [compacting, setCompacting] = useState(null); // {chars} while a summary is being written
   const compactAbortRef = useRef(null);
+
+  const [contextStatus, setContextStatus] = useState(null);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [settingsConflict, setSettingsConflict] = useState(null);
+  const contextBusyRef = useRef(false);
+  const contextChatIdRef = useRef(chat?.id);
+  contextChatIdRef.current = chat?.id;
+
+  const currentContextStatus =
+    contextStatus?.chatId === chat?.id ? contextStatus : null;
+  const persistent = currentContextStatus?.enabled === true;
+  const contextActive =
+    currentContextStatus !== null &&
+    (!persistent || currentContextStatus.active_chat_id === chat?.id);
+
+  async function refreshContextStatus(chatId) {
+    const status = await api.getContextStatus(chatId);
+    if (contextChatIdRef.current === chatId) {
+      setContextStatus({ ...status, chatId });
+    }
+    return status;
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setContextStatus(null);
+    const chatId = chat.id;
+    api.getContextStatus(chatId)
+      .then((status) => {
+        if (!cancelled && contextChatIdRef.current === chatId) {
+          setContextStatus({ ...status, chatId });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) stream.flashError(error.message);
+      });
+    return () => { cancelled = true; };
+  }, [chat?.id]);
 
   const [input, setInput] = useState("");
   const [images, setImages] = useState([]); // attached images (data-URI), until sent
@@ -34,11 +113,12 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const askEveryTool = !!hostTools && askEveryToolPref;
 
   const [editingId, setEditingId] = useState(null);
+  const [editingRole, setEditingRole] = useState(null);
   const [editContent, setEditContent] = useState("");
   const [editTarget, setEditTarget] = useState({ serverId: null, model: "" });
 
   const supportsVision = !!selectedServer?.vision_models?.includes(model);
-  const canSend = (!!input.trim() || !!images.length || !!attachments.length) && !!serverId && !!model;
+  const canSend = (!!input.trim() || !!images.length || !!attachments.length) && !!serverId && !!model && modelReadiness.ready && !switchingModel;
 
   useEffect(() => {
     localStorage.setItem(USE_TOOLS_KEY, useTools ? "1" : "0");
@@ -122,11 +202,68 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     addFiles(files);
   }
 
-  async function handleSend() {
-    if (!canSend || stream.sending) return;
-    const content = input.trim();
-    const imgs = images;
-    const atts = attachments;
+  async function handleSend(override = null) {
+    if ((!override && !canSend) || stream.sending || contextBusyRef.current) return;
+    const content = override ? override.content : input.trim();
+    const imgs = override ? override.images : images;
+    const atts = override ? override.attachments : attachments;
+    const chosenServer = override ? override.serverId : serverId;
+    const chosenModel = override ? override.model : model;
+    const chosenTools = override ? override.useTools : useTools;
+    const chosenAsk = override ? override.askEveryTool : askEveryTool;
+    const continueOriginal = false;
+    const confirmedChange = !!override?.confirmConfigurationChange;
+
+    if (currentContextStatus === null || contextBusyRef.current) return;
+
+    // Check before touching Buun or clearing the draft. The server also checks
+    // again before committing the message, so this UI is advisory, not security.
+    const proposed = { content, images: imgs, attachments: atts, serverId: chosenServer, model: chosenModel, useTools: chosenTools, askEveryTool: chosenAsk, continueOriginal };
+    if (persistent && !confirmedChange) {
+      contextBusyRef.current = true;
+      setContextBusy(true);
+      try {
+        const decision = await api.checkContextCompatibility(chat.id, proposed);
+        if (decision.requires_confirmation) {
+          setSettingsConflict({ reasons: decision.reasons, chatId: chat.id, proposed });
+          return;
+        }
+      } catch (error) {
+        stream.flashError(error.message);
+        return;
+      } finally {
+        contextBusyRef.current = false;
+        setContextBusy(false);
+      }
+    }
+
+    if (persistent && !confirmedChange && (!contextActive || !currentContextStatus.initialized)) {
+      contextBusyRef.current = true;
+      setContextBusy(true);
+      try {
+        const payload = {
+          content, images: imgs, attachments: atts,
+          serverId: chosenServer, model: chosenModel, useTools: chosenTools, askEveryTool: chosenAsk, continueOriginal,
+        };
+        const chatId = chat.id;
+        if (!currentContextStatus.initialized) {
+          await api.initializeChatContext(chatId, payload);
+        }
+        await api.activateChatContext(chatId);
+        const status = await refreshContextStatus(chatId);
+        if (contextChatIdRef.current !== chat.id ||
+            status.active_chat_id !== chat.id) {
+          throw new Error("Persistent context activation was not confirmed");
+        }
+      } catch (error) {
+        stream.flashError(error.message);
+        return;
+      } finally {
+        contextBusyRef.current = false;
+        setContextBusy(false);
+      }
+    }
+
     setInput("");
     setImages([]);
     setAttachments([]);
@@ -136,7 +273,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
       ({ signal, onPiece }) =>
         api.sendMessage(
           chat.id,
-          { content, images: imgs, attachments: atts, serverId, model, useTools, askEveryTool, signal },
+          { content, images: imgs, attachments: atts, serverId: chosenServer, model: chosenModel, useTools: chosenTools, askEveryTool: chosenAsk, continueOriginal, confirmConfigurationChange: confirmedChange, signal },
           onPiece
         ),
       {
@@ -151,14 +288,60 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     );
   }
 
+  const forkStartedRef = useRef(null);
+  useEffect(() => {
+    if (!forkDraft || forkStartedRef.current === chat.id) return;
+    // A fork navigates to a new chat, but useServerModel retains its previous
+    // selection. Set the fork's requested target before trying to send.
+    if (serverId !== forkDraft.serverId || model !== forkDraft.model) {
+      setTarget({ serverId: forkDraft.serverId, model: forkDraft.model });
+      return;
+    }
+    // Wait for the new chat's status and model readiness. The previous code
+    // consumed the draft while the new model could still be loading.
+    if (currentContextStatus === null || !modelReadiness.ready || contextBusyRef.current) return;
+    forkStartedRef.current = chat.id;
+    setInput(forkDraft.content);
+    setImages(forkDraft.images || []);
+    setAttachments(forkDraft.attachments || []);
+    onForkDraftConsumed();
+    handleSend(forkDraft).catch((error) => stream.flashError(error.message));
+  }, [forkDraft, currentContextStatus, chat.id, serverId, model, modelReadiness.ready]);
+
+  async function resolveSettingsConflict(choice) {
+    const conflict = settingsConflict;
+    if (!conflict || contextBusyRef.current) return;
+    if (choice === "cancel") { setSettingsConflict(null); return; }
+    if (choice === "continue") {
+      setSettingsConflict(null);
+      await handleSend({ ...conflict.proposed, confirmConfigurationChange: true });
+      return;
+    }
+    contextBusyRef.current = true;
+    setContextBusy(true);
+    try {
+      const result = await api.forkConversation(conflict.chatId, conflict.proposed);
+      setSettingsConflict(null);
+      // Keep the draft intact: navigating to the fork must not send to the parent.
+      onForked(result.chat_id, conflict.proposed);
+    } catch (error) {
+      stream.flashError(error.message);
+    } finally {
+      contextBusyRef.current = false;
+      setContextBusy(false);
+    }
+  }
+
   function startEdit(m) {
     setEditingId(m.id);
+    setEditingRole(m.role);
     setEditContent(m.content);
     setEditTarget({ serverId, model });
   }
 
   function cancelEdit() {
     setEditingId(null);
+    setEditingRole(null);
     setEditContent("");
   }
 
@@ -180,11 +363,25 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     if (!editContent.trim() || stream.sending) return;
     const mid = editingId;
     const content = editContent.trim();
+    const hasLaterMessages = chat.messages?.some(m => m.id > mid);
+    if (hasLaterMessages && !window.confirm(
+      "Editing this message will remove every later message in this conversation. Continue?"
+    )) return;
+    if (editingRole === "assistant") {
+      try {
+        await api.editAssistantMessage(chat.id, mid, content, editTarget.serverId, editTarget.model, useTools);
+        cancelEdit();
+        await onMessageSent();
+      } catch (error) {
+        stream.flashError(error.message);
+      }
+      return;
+    }
     cancelEdit();
     await stream.run(
       ({ signal, onPiece }) =>
         api.editMessage(chat.id, mid, { content, ...editTarget, useTools, askEveryTool, signal }, onPiece),
-      { chatId: chat.id, agent: chat.mode === "agent", afterClear: () => onMessageSent() }
+      { chatId: chat.id, agent: chat.mode === "agent", beforeClear: () => onMessageSent() }
     );
   }
 
@@ -277,7 +474,31 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
           </button>
         )}
         <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 md:flex-none">
-          <ServerModelPicker servers={upServers} value={{ serverId, model }} onChange={setTarget} />
+          <ServerModelPicker servers={upServers} value={{ serverId, model }} onChange={handleModelSelection} />
+          {model && (
+            <span
+              role="status"
+              aria-live="polite"
+              title={modelReadiness.error || undefined}
+              className="text-xs opacity-70 whitespace-nowrap"
+            >
+              {({
+                checking: "Checking…",
+                loading: "Loading…",
+                loaded: "Ready",
+                unloaded: "Unloaded",
+                failed: "Failed",
+                unavailable: "Unavailable",
+              })[modelReadiness.status] || modelReadiness.status}
+            </span>
+          )}
+          {model && modelReadiness.status === "unloaded" && (
+            <button type="button" onClick={loadSelectedModel}
+              disabled={switchingModel || stream.sending}
+              className="rounded border border-neutral-500 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-50">
+              {switchingModel ? "Loading…" : "Load model"}
+            </button>
+          )}
         </div>
         {hostTools && (
           <button
@@ -340,7 +561,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         onSend={handleSend}
         onStop={stream.stop}
         sending={stream.sending}
-        canSend={canSend}
+        canSend={canSend && currentContextStatus !== null && !contextBusy}
         images={images}
         onRemoveImage={(i) => setImages(images.filter((_, j) => j !== i))}
         attachments={attachments}
@@ -354,6 +575,15 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         onToggleAskEveryTool={() => setAskEveryTool((v) => !v)}
       />
 
+      {settingsConflict?.chatId === chat.id && (
+        <ContextSettingsDialog
+          reasons={settingsConflict.reasons}
+          busy={contextBusy}
+          onContinue={() => resolveSettingsConflict("continue")}
+          onFork={() => resolveSettingsConflict("fork")}
+          onCancel={() => resolveSettingsConflict("cancel")}
+        />
+      )}
       <ToolOutputModal tool={inspecting} onClose={() => setInspecting(null)} />
 
       {lightbox && (

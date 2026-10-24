@@ -21,12 +21,16 @@ runs on the event loop.
 """
 import asyncio
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from app import config
 from app.config import APPROVAL_HEARTBEAT
+from app.context_turn_preflight import ContextPreflightError
+
+logger = logging.getLogger(__name__)
 
 PING = json.dumps({"type": "ping"}) + "\n"
 
@@ -79,6 +83,17 @@ def start(chat_id: int, user_id: int | None, lines: AsyncIterator[str]) -> Turn:
         try:
             async for line in lines:
                 turn._append(line)
+        except ContextPreflightError as exc:
+            turn._append(json.dumps({
+                "type": "error",
+                "message": str(exc),
+            }) + "\n")
+        except Exception:
+            logger.exception("Background turn failed for chat %s", chat_id)
+            turn._append(json.dumps({
+                "type": "error",
+                "message": "The reply failed unexpectedly. Check the server logs.",
+            }) + "\n")
         finally:
             # Ends the generator on cancellation too, so its `finally` saves the partial reply
             # before this turn is gone from the registry.

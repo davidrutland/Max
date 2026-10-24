@@ -1,0 +1,10 @@
+# Optional read-only model-files mount for identity verification.
+services:
+  calivi-backend:
+    volumes:
+      - type: bind
+        source: ${MODEL_FILES_HOST_PATH:?Set MODEL_FILES_HOST_PATH in .env}
+        target: ${MODEL_FILES_CONTAINER_PATH:-/model-files}
+        read_only: true
+        bind:
+          create_host_path: false

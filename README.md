@@ -12,7 +12,7 @@ Max is based on Calivi v0.6.5 and adds its own interface, conversation managemen
 
 ## Reference architecture
 
-- **Inference:** Buun serving Qwen3.6-35B-A3B APEX through an OpenAI-compatible endpoint. The inference server and model weights are managed separately from Max.
+- **Inference:** Buun (`b9637-3589-gd2407c33f`, commit `d2407c33f9595d1badccfd9a82a33c4c5ceda490`) serving Qwen3.6-35B-A3B APEX through an OpenAI-compatible endpoint. The inference server and model weights are managed separately from Max.
 - **Execution:** OpenHands agent-server in Docker, with a persistent workspace and five tools: `sandbox_exec`, `sandbox_edit`, `sandbox_write`, `sandbox_read`, and `sandbox_ls`.
 - **Retrieval:** Custom `web_search` with enhanced snippets and `web_fetch` for readable page content. The host-side search service uses DuckDuckGo with Brave fallback, Camoufox, and Mozilla Readability.
 - **Application:** Python backend, React frontend, bundled SearXNG, and Docker Compose.
@@ -110,6 +110,76 @@ SEARCH_TIMEOUT=15
 ```
 
 `SEARCH_TIMEOUT` controls the timeout used by the backend when communicating with the local search infrastructure.
+
+## SSD-backed conversation context (Buun)
+
+### Why this exists
+
+On memory-constrained systems, a long conversation may take a substantial time to **re-prefill**: the inference backend must process the entire prior conversation to rebuild its attention KV cache. Switching between conversations can repeat this work. After restarting the inference backend or rebooting the machine, its in-memory KV cache is gone, so every conversation would otherwise need re-prefilling when reopened. This is especially costly with large, partly CPU-offloaded models.
+
+Max therefore supports saving Buun's live inference slot to **SSD** and restoring it later. The database remains the authoritative record of messages; saved KV state is a performance cache, not a replacement for chat history or a backup. Buun is used because it supports slot save/restore **and KV-cache compression**, making long contexts more practical on constrained hardware. Other backends may be integrated if they offer comparable persistence with better performance; **Buun is currently the only supported backend for Max SSD persistence**. A generic OpenAI-compatible endpoint is not sufficient.
+
+### Configuration
+
+Copy `.env.example` to `.env`, and configure the following for persistence. All settings below are included in `.env.example` and passed through by Compose as applicable.
+
+| Setting | Purpose |
+| --- | --- |
+| `CONTEXT_PERSISTENCE_MODE=disabled` | Default; normal inference without SSD persistence coordination. Set `auto` to enable. |
+| `CONTEXT_SNAPSHOT_TURN_INTERVAL=10` | Save after this many completed assistant turns; saving when a slot is displaced also applies. Must be at least 1. |
+| `CONTEXT_SNAPSHOT_HOST_PATH=/path/to/your/snapshots` | Host directory for saved slots; must be the **same actual directory** used by Buun's `--slot-save-path`. |
+| `CONTEXT_SNAPSHOT_CONTAINER_PATH=/context-snapshots` | Path where that host directory is mounted inside the Max backend container. |
+| `BUUN_CONTEXT_URL=http://host.docker.internal:8080` | Example only: Buun router endpoint **as reachable from the backend container**; adjust to your Docker networking. |
+| `BUUN_CONTEXT_MODEL=Max` | Example model alias; must match the model name advertised by the configured router. |
+| `BUUN_BACKEND_IDENTITY=buun-local` | Stable administrator-chosen identifier for the same compatible backend installation; do not reuse for an incompatible backend. |
+| `BUUN_CONTEXT_SERVER_ID=1` | Positive integer identifying the configured server in Max; use the correct server ID for your installation. |
+| `BUUN_SLOT_SAVE_PATH=/context-snapshots` | Directory path **inside the Max backend container** for slot files. Compose sets this from `CONTEXT_SNAPSHOT_CONTAINER_PATH`; keep them equal. This is not the host-side path passed to Buun. |
+
+`docker-compose.yml` already supplies the snapshot bind mount and forwards these values to the backend. The optional `docker-compose.context-snapshots.yml` is **not required** with the main Compose configuration. Ensure the host directory exists and is writable by both Buun and the Max backend container. Do not put snapshots into Git. `OLLAMA_CHAT_TIMEOUT` may need increasing for very long fresh prefills; it measures streaming silence, not total generation duration.
+
+### Starting Buun
+
+The reference installation starts **router mode** with a model preset file and one model worker at a time:
+
+```bash
+~/AI/buun-llama-cpp/build/bin/llama-server \
+  --models-preset /home/david/AI/llama-models.ini \
+  --models-max 1 \
+  --models-autoload \
+  --host 0.0.0.0 --port 8080 \
+  --slot-save-path /home/david/AI/slot-snapshots
+```
+
+Replace the paths with your own. The snapshot path must match `CONTEXT_SNAPSHOT_HOST_PATH` in `.env`. The preset file must configure the model(s), their aliases, and their inference settings; it is external to this repository. Configure Max's model endpoint and `BUUN_CONTEXT_MODEL` to match the selected router model. Models must be loaded before restoring their slot state.
+
+Buun can also be launched as a **direct, single-model server**:
+
+```bash
+~/AI/buun-llama-cpp/build/bin/llama-server \
+  --model /path/to/model.gguf \
+  --host 0.0.0.0 --port 8080 \
+  --slot-save-path /path/to/slot-snapshots
+```
+
+Add model-specific context, GPU offload, CPU MoE offload, flash-attention and KV compression options appropriate to your model and hardware. This is a basic Buun startup example, **not a claim that Max's current SSD coordinator has been validated in direct mode**: the inspected startup code currently constructs a router transport and requires router-related settings. Ordinary non-persistent inference may use a directly loaded endpoint.
+
+### Operation and compatibility
+
+In `auto` mode, Max restores a compatible saved slot when switching back to a conversation, and saves live context on displacement and at the configured completed-turn interval. If a checkpoint is missing or invalidated, Max reconstructs context from database messages through the normal generation path; the first response may consequently be slow. Saving to SSD incurs disk space and I/O, so choose a sensible interval.
+
+Changing the selected **model name**, effective system prompt, or available tools can invalidate the saved context. Max warns with **Continue / Fork / Cancel**: Continue keeps the conversation but rebuilds with the new configuration and replaces the prior checkpoint; Fork creates an independent conversation and checkpoint while retaining the original; Cancel leaves the existing conversation unchanged. These are user choices, not forced forks. Editing or deleting user/assistant messages invalidates affected checkpoint state and uses normal message regeneration rather than a separate prefill system.
+
+In `disabled` mode, normal chat remains available without SSD coordination or configuration-change warnings. Changes made in this mode must not later restore an outdated checkpoint when persistence is re-enabled.
+
+### Caveats and warnings
+
+- **Use the tested Buun build** (reference commit above) or explicitly verify save, restore, erase, and compressed-KV compatibility before enabling `auto`. Other llama.cpp forks and generic OpenAI-compatible servers are not automatically compatible.
+- **Model identity is name-based**, not a weights/tokenizer hash. The administrator must not silently replace a model behind the same name with incompatible weights or settings. Preserve the actual model and KV configuration needed to restore a checkpoint.
+- Keep snapshot files on persistent, writable storage shared by the host inference process and backend container. A Docker container path is **not** the same as a host path; both must resolve to the same files. Ensure sufficient free disk space and permissions.
+- SSD snapshots are caches, not durable message backups. Back up the Max database separately. A missing snapshot is recoverable by re-prefilling; a missing database is not.
+- Avoid changing Buun builds, model definitions, context/KV settings, or snapshot ownership behind an existing checkpoint. When uncertain, invalidate/rebuild rather than attempting to restore incompatible state.
+- The reference setup uses a single persistence owner/worker and one active model worker. Do not assume multi-worker, multi-process, or concurrent slot ownership is safe without additional verification.
+- Long prefills can still occur after configuration changes, edits, missing checkpoints, or restarts when no valid saved state exists. SSD persistence reduces repeated work; it does not eliminate prefill entirely.
 
 ## Search
 

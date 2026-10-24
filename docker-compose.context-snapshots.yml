@@ -1,0 +1,11 @@
+# Optional read/write snapshot mount for Calivi context persistence.
+# Use together with docker-compose.yml; never creates a missing host directory.
+services:
+  calivi-backend:
+    volumes:
+      - type: bind
+        source: ${CONTEXT_SNAPSHOT_HOST_PATH:?Set CONTEXT_SNAPSHOT_HOST_PATH in .env}
+        target: ${CONTEXT_SNAPSHOT_CONTAINER_PATH:-/context-snapshots}
+        read_only: false
+        bind:
+          create_host_path: false

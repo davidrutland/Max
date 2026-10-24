@@ -152,7 +152,7 @@ export default function Composer({
           </button>
         ) : (
           <button
-            onClick={onSend}
+            onClick={() => onSend()}
             disabled={!canSend}
             className="h-10 px-4 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
           >

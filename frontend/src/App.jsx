@@ -44,6 +44,7 @@ export default function App() {
     return n || null; // restore the last active chat after a refresh
   });
   const [activeChat, setActiveChat] = useState(null);
+  const [forkDraft, setForkDraft] = useState(null); // one-shot first turn for a settings fork
   const [searchTarget, setSearchTarget] = useState(null); // {chatId, messageId, sequence}
   const [servers, setServers] = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -251,7 +252,8 @@ export default function App() {
   }
 
   // Fork: switch to the new chat id once it arrives in the header (the stream keeps flowing into it).
-  async function handleForked(newChatId) {
+  async function handleForked(newChatId, draft = null) {
+    if (draft) setForkDraft({ chatId: newChatId, draft });
     setActiveChatId(newChatId);
     await refreshChats();
   }
@@ -313,6 +315,8 @@ export default function App() {
           hostTools={!!me?.host_tools}
           onMessageSent={handleMessageSent}
           onForked={handleForked}
+          forkDraft={forkDraft?.chatId === activeChat.id ? forkDraft.draft : null}
+          onForkDraftConsumed={() => setForkDraft(null)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       ) : (

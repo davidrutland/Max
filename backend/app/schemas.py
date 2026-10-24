@@ -227,6 +227,8 @@ class SendMessageIn(BaseModel):
     model: str | None = None  # None → chosen by the caller (on server_id if given)
     use_tools: bool = False  # when on, the tool layer is offered to the model (it decides what to call)
     ask_every_tool: bool = False  # when on, every tool call waits for the user's approval
+    continue_original: bool = False  # legacy request field
+    confirm_configuration_change: bool = False  # user chose Continue after mismatch warning
 
 
 class EditMessageIn(BaseModel):
@@ -236,6 +238,12 @@ class EditMessageIn(BaseModel):
     model: str | None = None
     use_tools: bool = False
     ask_every_tool: bool = False
+
+
+class ForkConversationIn(BaseModel):
+    """Create a history-only fork; the first new turn is sent separately."""
+    server_id: int | None = None
+    model: str | None = None
 
 
 class ForkIn(BaseModel):
