@@ -255,3 +255,4 @@ class ForkIn(BaseModel):
     model: str | None = None
     use_tools: bool = False
     ask_every_tool: bool = False
+    confirm_new_context: bool = False

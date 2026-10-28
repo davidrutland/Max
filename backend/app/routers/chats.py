@@ -1391,22 +1391,6 @@ async def fork_chat(
         except Exception:
             db.rollback()
             raise
-        async with owner.lock:
-            _ensure_idle(chat_id)
-            _ensure_idle(new_chat.id)
-            try:
-                owner.coordinator.register(new_chat.id, user_id=user.id)
-                await require_buun_model_ready(model)
-                await owner.coordinator.switch(new_chat.id)
-            except (ContextPreflightError, LiveContextError, ContextSwitchError) as exc:
-                raise HTTPException(503, f"Fork created but activation failed: {exc}") from exc
-            # Keep the slot lock from activation through prefill and checkpoint.
-            # Otherwise a concurrent request could replace the slot between
-            # activation and reconstruction.
-            await _rewrite_persistent_history(db, new_chat.id, user,
-                                              mutation=lambda: None,
-                                              use_tools=payload.use_tools,
-                                              lock_held=True)
     else:
         db.commit()
 

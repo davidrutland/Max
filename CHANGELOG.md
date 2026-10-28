@@ -1,5 +1,19 @@
 ## Max
 
+### 2026-10-28 — Sidebar controls and conversation forking
+
+#### Changed
+
+- Search and Select remain visible and toggle independently; clicking an active button again closes its mode.
+- Active Search and Select buttons use a thicker border to indicate their state.
+- Removed the separate search Back control and selection Cancel control.
+- Replaced selection Cancel with Archive Selected, reusing the existing bulk archive operation. Select All, Delete Selected, and bulk unarchive remain available.
+
+#### Fixed
+
+- Editing an earlier user message and choosing New chat now creates a working fork and generates its reply. The frontend sends explicit new-context confirmation, and the backend accepts it in the fork request schema.
+- Removed redundant context activation and invalidation from fork creation. Forks use normal inference and their own persistence lifecycle rather than a special parent-checkpoint copy.
+
 ### 2026-10-28 — Buun checkpoint restore recovery
 
 #### Fixed

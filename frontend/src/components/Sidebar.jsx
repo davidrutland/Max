@@ -386,27 +386,36 @@ export default function Sidebar({
       )}
 
       <div className="shrink-0 px-3 pb-2" inert={bulkDeleting || bulkArchiving || chatListStale ? "" : undefined}>
-        {!selectionMode ? (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mb-2">
           <button type="button"
             aria-label="Search"
+            aria-pressed={searchOpen}
             aria-expanded={searchOpen}
-            onClick={() => setSearchOpen(true)}
-            className="px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors">
+            onClick={() => {
+              setSearchOpen(previous => !previous);
+              if (searchOpen) setSearchQuery("");
+            }}
+            className={`px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors ${searchOpen ? "border-2" : "border"}`}>
             Search
           </button>
           <button type="button"
+            aria-label="Select"
+            aria-pressed={selectionMode}
             onClick={() => {
               if (bulkDeleting || bulkArchiving || chatListStale) return;
-              setMenu(null);
-              setRenamingId(null);
-              setSelectionMode(true);
+              if (selectionMode) {
+                cancelSelection();
+              } else {
+                setMenu(null);
+                setRenamingId(null);
+                setSelectionMode(true);
+              }
             }}
-            className="px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors">
+            className={`px-3 py-1.5 text-sm font-semibold text-neutral-200 max-select-button border-solid border-current rounded-lg bg-transparent hover:bg-neutral-800 transition-colors ${selectionMode ? "border-2" : "border"}`}>
             Select
           </button>
-          </div>
-        ) : (
+        </div>
+        {selectionMode && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-neutral-200">
             <span className="font-semibold">{selectedIds.size} selected</span>
             <button type="button"
@@ -414,14 +423,6 @@ export default function Sidebar({
               className="ml-auto px-2 py-1 rounded hover:bg-neutral-800">
               Select all
             </button>
-            {canArchive && (
-              <button type="button"
-                disabled={bulkArchiving}
-                onClick={() => executeBulkArchive(true)}
-                className="px-2 py-1 rounded hover:bg-neutral-800 disabled:opacity-40">
-                {bulkArchiving ? "Working…" : "Archive selected"}
-              </button>
-            )}
             {canUnarchive && (
               <button type="button"
                 disabled={bulkArchiving}
@@ -439,25 +440,20 @@ export default function Sidebar({
               className="px-2 py-1 rounded text-red-400 hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed">
               Delete selected
             </button>
-            <button type="button"
-              onClick={cancelSelection}
-              className="px-2 py-1 rounded hover:bg-neutral-800">
-              Cancel
-            </button>
+            {canArchive && (
+              <button type="button"
+                disabled={bulkArchiving}
+                onClick={() => executeBulkArchive(true)}
+                className="px-2 py-1 rounded hover:bg-neutral-800 disabled:opacity-40">
+                {bulkArchiving ? "Working…" : "Archive selected"}
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {searchOpen && (
         <div className="shrink-0 px-3 pb-2 flex items-center gap-2">
-          <button type="button" aria-label="Back from search"
-            onClick={() => {
-              setSearchOpen(false);
-              setSearchQuery("");
-            }}
-            className="rounded-lg px-2 py-1.5 text-neutral-200 hover:bg-neutral-800">
-            ←
-          </button>
           <input ref={searchInputRef} type="search" aria-label="Search conversations"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}

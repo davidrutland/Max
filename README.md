@@ -167,7 +167,7 @@ Add model-specific context, GPU offload, CPU MoE offload, flash-attention and KV
 
 In `auto` mode, Max restores a compatible saved slot when switching back to a conversation, and saves live context on displacement and at the configured completed-turn interval. If a checkpoint is missing or invalidated, Max reconstructs context from database messages through the normal generation path; the first response may consequently be slow. Saving to SSD incurs disk space and I/O, so choose a sensible interval.
 
-Changing the selected **model name**, effective system prompt, or available tools can invalidate the saved context. Max warns with **Continue / Fork / Cancel**: Continue keeps the conversation but rebuilds with the new configuration and replaces the prior checkpoint; Fork creates an independent conversation and checkpoint while retaining the original; Cancel leaves the existing conversation unchanged. These are user choices, not forced forks. Editing or deleting user/assistant messages invalidates affected checkpoint state and uses normal message regeneration rather than a separate prefill system.
+Changing the selected **model name**, effective system prompt, or available tools can invalidate the saved context. Max warns with **Continue / Fork / Cancel**: Continue keeps the conversation but rebuilds with the new configuration and replaces the prior checkpoint; Fork creates an independent conversation with its own checkpoint lifecycle while retaining the original; Cancel leaves the existing conversation unchanged. These are user choices, not forced forks. Forks rebuild or reuse context through normal inference; Max does not copy the parent's SSD checkpoint as a special fork operation. Editing or deleting user/assistant messages invalidates affected checkpoint state and uses normal message regeneration rather than a separate prefill system.
 
 In `disabled` mode, normal chat remains available without SSD coordination or configuration-change warnings. Changes made in this mode must not later restore an outdated checkpoint when persistence is re-enabled.
 
@@ -244,7 +244,8 @@ The sidebar Search control is available on desktop and mobile.
 - Selecting a result opens its conversation and jumps to the exact message.
 - The selected message is temporarily highlighted.
 - Repeated jumps within an already-open conversation are supported.
-- Back closes search without changing the currently open conversation.
+- Clicking Search again closes search without changing the currently open conversation. Search and Select remain visible and can be toggled independently; an active control has a thicker border.
+- Select mode offers Select All, Delete Selected, and Archive Selected; clicking Select again exits selection mode without a separate Cancel button.
 
 ### Implementation
 

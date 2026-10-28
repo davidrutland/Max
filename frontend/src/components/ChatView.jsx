@@ -399,13 +399,14 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     if (!editContent.trim() || stream.sending) return;
     const mid = editingId;
     const content = editContent.trim();
-    cancelEdit();
     await stream.run(
       ({ signal, onPiece }) =>
         api.forkChat(
           chat.id,
           { messageId: mid, content, ...editTarget, useTools, askEveryTool, signal },
           (newId) => {
+            // Keep the editor open if the fork request is rejected.
+            cancelEdit();
             // Follow the new chat *before* switching to it, so the switch does not detach.
             stream.setChatId(newId);
             onForked(newId);

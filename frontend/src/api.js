@@ -239,6 +239,7 @@ export const api = {
       credentials: "include",
       body: JSON.stringify({
         message_id: messageId, content, use_tools: !!useTools, ask_every_tool: !!askEveryTool,
+        confirm_new_context: true,
         ...normalizeTarget(serverId, model),
       }),
       signal,
