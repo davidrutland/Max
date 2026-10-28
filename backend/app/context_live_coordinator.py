@@ -5,6 +5,7 @@ not merely while calling switch(), and verify model/prompt compatibility first.
 """
 from pathlib import Path
 import os
+import logging
 from uuid import uuid4
 import stat
 from contextlib import contextmanager, nullcontext
@@ -13,8 +14,11 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from app.context_binding_repository import get_binding, set_snapshot_status
-from app.context_orchestrator import ContextOrchestrator, ContextSwitchError
+from app.context_orchestrator import ContextOrchestrator, ContextSwitchError, ContextRestoreError
 from app.context_snapshot_files import SnapshotFileStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class LiveContextError(RuntimeError):
@@ -226,10 +230,35 @@ class LiveContextCoordinator:
             await self.orchestrator.switch(key)
             if previous != key:
                 self._turns_since_checkpoint = 0
-        except Exception:
-            # Transport save manages its own transaction. No process-lived
-            # session remains to roll back when using a session factory.
-            raise
+        except ContextRestoreError:
+            # A failed restore may leave partial KV in Buun. Clear it before
+            # allowing the destination to run without its snapshot.
+            try:
+                await self._transport.erase(self.orchestrator.slot_id)
+            except Exception:
+                # Keep the slot uncertain; never infer on untrusted KV.
+                raise ContextSwitchError("Restore recovery erase failed; slot remains uncertain") from None
+            # The slot is now empty. If DB invalidation fails, it remains
+            # uncertain and the caller must not continue.
+            with _session_scope(self.db_or_factory) as db:
+                try:
+                    set_snapshot_status(db, chat_id, self.chat_users[key], "absent")
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+            # The database no longer references this checkpoint. Reclaim its
+            # space, but do not block safe recovery on a filesystem error.
+            filename = self.orchestrator.contexts[key].filename
+            if isinstance(filename, str) and filename not in ("", ".", "..") and Path(filename).name == filename:
+                try:
+                    (self.store.directory / filename).unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Unable to remove failed restore snapshot for chat %s", chat_id, exc_info=True)
+            self.orchestrator.contexts[key].has_snapshot = False
+            self.orchestrator.reset_after_external_recovery()
+            await self.orchestrator.switch(key)
+            self._turns_since_checkpoint = 0
         finally:
             self._transport.source_chat = None
 

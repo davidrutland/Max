@@ -14,6 +14,10 @@ class ContextSwitchError(RuntimeError):
     """The requested switch did not complete safely."""
 
 
+class ContextRestoreError(ContextSwitchError):
+    """Destination restore failed after the slot was erased."""
+
+
 class SlotTransport(Protocol):
     async def save(self, slot_id: int, filename: str): ...
     async def restore(self, slot_id: int, filename: str): ...
@@ -110,7 +114,13 @@ class ContextOrchestrator:
                 await self.transport.erase(self.slot_id)
                 target = self.contexts[chat_id]
                 if target.has_snapshot:
-                    await self.transport.restore(self.slot_id, target.filename)
+                    try:
+                        await self.transport.restore(self.slot_id, target.filename)
+                    except Exception as exc:
+                        self.uncertain = True
+                        raise ContextRestoreError("Destination restore failed; recovery required") from exc
+            except ContextRestoreError:
+                raise
             except Exception as exc:
                 self.uncertain = True
                 raise ContextSwitchError("Slot replacement failed; recovery required") from exc

@@ -1,5 +1,26 @@
 ## Max
 
+### 2026-10-28 — Buun checkpoint restore recovery
+
+#### Fixed
+
+- Failed Buun SSD checkpoint restoration now triggers safe recovery
+  instead of leaving the conversation's KV slot in an uncertain state.
+- Recovery erases the affected slot, invalidates the checkpoint binding
+  in SQLite, and deletes the rejected checkpoint file.
+- Context is reconstructed from stored conversation history through
+  normal generation. If the recovery erase fails, inference stops
+  rather than using potentially invalid KV state.
+
+#### Validation
+
+- Live tests with deliberately invalid checkpoint files confirmed
+  restore rejection, recovery, checkpoint invalidation, file removal,
+  and successful continuation with conversation history preserved.
+- No dedicated frontend recovery notification is provided.
+- Obsolete test and unreferenced checkpoint files were manually
+  cleaned up; automatic orphan cleanup was not implemented.
+
 ### 2026-10-24 — Buun SSD-backed conversation persistence
 
 #### Why

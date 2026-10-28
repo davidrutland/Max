@@ -181,6 +181,25 @@ In `disabled` mode, normal chat remains available without SSD coordination or co
 - The reference setup uses a single persistence owner/worker and one active model worker. Do not assume multi-worker, multi-process, or concurrent slot ownership is safe without additional verification.
 - Long prefills can still occur after configuration changes, edits, missing checkpoints, or restarts when no valid saved state exists. SSD persistence reduces repeated work; it does not eliminate prefill entirely.
 
+### Checkpoint restore failure
+
+If Buun rejects a saved KV checkpoint during restoration, Max attempts
+to erase the affected slot, marks the checkpoint as absent in SQLite,
+and deletes the failed checkpoint file. Generation then proceeds using
+the stored conversation history, rebuilding context as necessary.
+
+The next response may take longer, but stored conversation messages
+remain intact. If the slot cannot be safely erased, Max stops rather
+than running inference with potentially invalid KV state.
+
+Recovery is automatic and does not currently display a separate
+notification in the chat interface.
+
+Checkpoint files can consume substantial disk space. Development and
+interrupted operations may leave unreferenced files in the configured
+snapshot directory. Check database bindings and other Buun consumers
+before deleting checkpoint files manually.
+
 ## Search
 
 Max's search path uses the local `calivi-search` integration and the host-side `search_service`.
