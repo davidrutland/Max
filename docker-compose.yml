@@ -99,7 +99,8 @@ services:
       - openhands-workspace:/workspace
 
   calivi-frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
     container_name: calivi-frontend
     restart: unless-stopped
     depends_on:

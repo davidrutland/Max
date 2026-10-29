@@ -111,6 +111,18 @@ SEARCH_TIMEOUT=15
 
 `SEARCH_TIMEOUT` controls the timeout used by the backend when communicating with the local search infrastructure.
 
+## Sandbox file attachments and previews
+
+Max can publish files created in the OpenHands `/workspace` directory directly into a chat. The model uses `sandbox_attach` with an existing workspace file path; the resulting message displays an **Open** control for each attachment. The preview panel includes **Download**, including for file types without a built-in preview. Model-generated download URLs are unnecessary and should not be relied upon.
+
+- **Previews:** text and Markdown, images (including SVG), PDF, audio, video, standalone HTML, and multi-file HTML projects packaged as ZIP archives. Unsupported formats remain downloadable.
+- **Interactive HTML:** runs in a sandboxed iframe with a server-enforced Content Security Policy. ZIP projects can include relative HTML, CSS, JavaScript, image, and font assets within the supported preview allowlist. A ZIP project should provide `index.html` at its root. Invalid or unsupported previews do not prevent downloading the original file.
+- **Deployment:** previews use `/preview/` on the existing Max address and port; no separate preview listener, hostname, certificate, or reverse-proxy route is required. The browser sandbox restricts access to Max's cookies, storage, APIs, and parent page. Do not remove the sandbox/CSP restrictions when changing preview routing.
+- **Storage and lifecycle:** published files are immutable snapshots stored in `/data/artifacts` in the persistent application data volume, independently of the sandbox workspace and Buun KV checkpoints. Attachments survive Max and inference-server restarts. Conversation forks retain references to shared artifacts; the stored file is reclaimed after its last message reference is removed.
+- **Limits:** an individual published attachment is limited to 100 MiB. ZIP previews have additional per-entry, aggregate-size, and entry-count limits. PDF previews currently render up to 100 pages.
+
+Download and preview-ticket issuance require access to a conversation referencing the artifact. Interactive previews use short-lived bearer tickets; treat preview URLs as temporary access links and avoid sharing or logging them. Back up the persistent application data volume if attachments must survive host or disk loss; inference checkpoints are not attachment backups.
+
 ## SSD-backed conversation context (Buun)
 
 ### Why this exists

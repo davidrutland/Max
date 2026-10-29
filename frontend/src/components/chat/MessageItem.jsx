@@ -1,4 +1,6 @@
 import Markdown from "../Markdown.jsx";
+import { useState } from "react";
+import ArtifactPreview from "./ArtifactPreview.jsx";
 import { AttachmentChip, CopyButton, DeleteButton, EditButton } from "./MessageActions.jsx";
 import StepTimeline from "./StepTimeline.jsx";
 import { toTimeline } from "../../lib/timeline.js";
@@ -12,6 +14,7 @@ import { formatTs, tokensPerSecLabel } from "../../lib/format.js";
  */
 export default function MessageItem({ m, onEdit, onDelete, onImageClick, onInspect, searchHighlighted = false }) {
   const isUser = m.role === "user";
+  const [preview, setPreview] = useState(null);
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -51,6 +54,14 @@ export default function MessageItem({ m, onEdit, onDelete, onImageClick, onInspe
           </div>
         )}
 
+        {m.published_artifacts?.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {m.published_artifacts.map(a => (
+              <button key={a.id} type="button" onClick={() => setPreview(a)} className="rounded-lg bg-neutral-700 px-2 py-1 text-xs hover:underline" title={`Open ${a.filename}`}>👁 {a.filename}</button>
+            ))}
+          </div>
+        )}
+        <ArtifactPreview artifact={preview} onClose={() => setPreview(null)} />
         {!isUser && m.steps?.length > 0 && <StepTimeline items={toTimeline(m.steps)} />}
         {isUser ? <span className="whitespace-pre-wrap">{m.content}</span> : <Markdown content={m.content} />}
 

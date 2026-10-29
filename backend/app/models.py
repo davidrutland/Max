@@ -134,6 +134,7 @@ class Message(Base):
     timestamp: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
+    artifact_references: Mapped[list["ArtifactReference"]] = relationship(lazy="selectin", viewonly=True)
 
 
 class ChatContextBinding(Base):
@@ -159,3 +160,23 @@ class ChatContextBinding(Base):
     snapshot_path: Mapped[str | None] = mapped_column(String(1000), unique=True, nullable=True)
     snapshot_status: Mapped[str] = mapped_column(String(20), nullable=False, default="absent")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Artifact(Base):
+    """Immutable published blob; the opaque ID is also its storage filename."""
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ArtifactReference(Base):
+    """A message owns a reference; forks get separate references to the same blob."""
+    __tablename__ = "artifact_references"
+
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True)
+    artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id", ondelete="CASCADE"), primary_key=True)
+    artifact: Mapped["Artifact"] = relationship(lazy="joined", viewonly=True)

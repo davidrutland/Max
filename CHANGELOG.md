@@ -1,5 +1,20 @@
 ## Max
 
+### 2026-10-29 — Sandbox attachments and portable previews
+
+#### Added
+
+- `sandbox_attach` for publishing existing OpenHands workspace files as immutable, message-owned chat attachments, with an Open control and Download inside the preview panel.
+- Previews for text/Markdown, images and SVG, PDF (PDF.js), audio, video, standalone interactive HTML, and multi-file ZIP HTML projects.
+- Same-address `/preview/` routing for interactive HTML, with iframe sandboxing and a server-enforced CSP; no second listener or extra reverse-proxy configuration.
+- Persistent artifact storage, shared references across conversation forks, and cleanup when the final reference is removed.
+- ZIP preview validation and attachment authorization regression tests.
+
+#### Validation
+
+- Live tests confirmed preview/download on desktop and mobile, persistence across Max and Buun restarts, and reference cleanup across fork deletion.
+- 18 ZIP-parser tests and 4 authorization integration tests passed; browser probes confirmed blocked access to cookies, storage, and Max APIs, plus blocked parent navigation. A full browser-security audit is not claimed.
+
 ### 2026-10-28 — Sidebar controls and conversation forking
 
 #### Changed

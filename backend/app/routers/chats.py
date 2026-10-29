@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import auth, compaction, config, models, schemas, llm, tools_config
+from app import auth, compaction, config, models, schemas, llm, tools_config, artifact_refs, artifact_store
 from app.database import get_db, SessionLocal
 from app.system_prompts import get_system_prompt
 from app.context_original_prompt import effective_prompt_for_turn
@@ -29,6 +29,7 @@ from app.buun_context_transport import TransportMode
 from app.context_binding_repository import set_snapshot_status
 from app.config import APPROVAL_HEARTBEAT, APPROVAL_TIMEOUT
 from app.tools import ERROR_PREFIX, host, mcp_client, registry
+from app.tools.sandbox import fetch_attachment
 from app.routers.users import SUPER_ADMIN_ID
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -339,6 +340,7 @@ def build_stream_response(
         collected = ""
         tokens_per_sec = None
         error_msg = None
+        published_artifacts: list[tuple[str, str, int]] = []
         tool_chips: list[dict] = []  # tool-usage chips shown after a reload
         steps: list[dict] = []  # agent mode: the turn's tool traffic, saved with the reply
         tail_text = ""  # agent mode: text since the last step — the reply's own content
@@ -417,6 +419,13 @@ def build_stream_response(
                             strict=ask_every_tool,
                         )
                         ok = not result.startswith(ERROR_PREFIX)
+                        if ok and call["name"] == "sandbox_attach":
+                            # Ownership is derived from the authenticated turn, never model arguments.
+                            path = result
+                            data = await fetch_attachment(path)
+                            identifier = artifact_store.publish(data)
+                            published_artifacts.append((identifier, path.rsplit("/", 1)[-1], len(data)))
+                            result = f"Published {path} as attachment {identifier}"
                     except Exception:
                         # A tool failure must not kill the stream: the model gets an error string
                         # and can recover.
@@ -477,15 +486,14 @@ def build_stream_response(
             # (CancelledError is a BaseException, so it never reaches the except) or a model
             # that simply returned no text still persisted an empty row, which renders as a
             # blank assistant bubble indistinguishable from a real reply.
-            if content_to_save.strip() or steps:  # a stopped agent turn keeps the steps it ran
+            if content_to_save.strip() or steps or published_artifacts:  # a stopped agent turn keeps the steps it ran
                 save_db = SessionLocal()
                 try:
                     # The chat may have been deleted while this turn ran (the delete cancels it,
                     # and this finally is where the cancellation lands): nothing to attach to.
                     # Not an early `return` — in a finally that would swallow the cancellation.
                     if save_db.get(models.Chat, chat_id) is not None:
-                        save_db.add(
-                            models.Message(
+                        reply = models.Message(
                                 chat_id=chat_id,
                                 role="assistant",
                                 content=content_to_save,
@@ -494,7 +502,12 @@ def build_stream_response(
                                 tokens_per_sec=tokens_per_sec,
                                 steps=steps or None,
                             )
-                        )
+                        save_db.add(reply)
+                        save_db.flush()
+                        for identifier, filename, size in published_artifacts:
+                            import mimetypes
+                            save_db.add(models.Artifact(id=identifier, filename=filename[:255], mime_type=mimetypes.guess_type(filename)[0] or "application/octet-stream", size=size))
+                            save_db.add(models.ArtifactReference(message_id=reply.id, artifact_id=identifier))
                         save_db.query(models.Chat).filter(models.Chat.id == chat_id).update({"updated_at": models.utcnow()})
                         save_db.commit()
                 except IntegrityError:
@@ -503,6 +516,14 @@ def build_stream_response(
                     save_db.rollback()
                 finally:
                     save_db.close()
+                # Uncommitted blobs must not accumulate after a cancelled/deleted turn.
+                with SessionLocal() as check_db:
+                    for identifier, _, _ in published_artifacts:
+                        if check_db.get(models.Artifact, identifier) is None:
+                            artifact_store.remove(identifier)
+            else:
+                for identifier, _, _ in published_artifacts:
+                    artifact_store.remove(identifier)
 
     lines = context_turn_boundary.wrap(generate(), enabled=False)
 
@@ -617,7 +638,16 @@ def _drop_summary_if_covers(db: Session, chat_id: int, message_id: int) -> None:
 def _detail(chat: models.Chat) -> schemas.ChatDetailOut:
     """Chat detail, including whether a reply is still running (the UI re-attaches to it)."""
     out = schemas.ChatDetailOut.model_validate(chat)
-    return out.model_copy(update={**compaction.status(chat), "active_turn": turns.is_active(chat.id)})
+    artifacts_by_message = {}
+    for message in chat.messages:
+        artifacts_by_message[message.id] = [
+            schemas.PublishedArtifactOut.model_validate({
+                "id": ref.artifact.id, "filename": ref.artifact.filename,
+                "mime_type": ref.artifact.mime_type, "size": ref.artifact.size,
+            }) for ref in message.artifact_references
+        ]
+    updated_messages = [m.model_copy(update={"published_artifacts": artifacts_by_message.get(m.id, [])}) for m in out.messages]
+    return out.model_copy(update={**compaction.status(chat), "active_turn": turns.is_active(chat.id), "messages": updated_messages})
 
 
 def _inject_attachments(messages: list[dict]) -> list[dict]:
@@ -727,6 +757,7 @@ async def delete_chat(
             owned_snapshot = binding.snapshot_path if binding is not None else None
             db.delete(chat)
             db.commit()
+            artifact_refs.reclaim(db)
             # DB deletion is authoritative. A failed filesystem cleanup is
             # recoverable; never resurrect a deleted chat on cleanup failure.
             if owned_snapshot:
@@ -744,6 +775,7 @@ async def delete_chat(
     else:
         db.delete(chat)
         db.commit()
+        artifact_refs.reclaim(db)
     turns.cancel(chat_id)
 
 
@@ -1207,6 +1239,9 @@ async def delete_message(
         db.commit()
 
 
+    artifact_refs.reclaim(db)
+
+
 @router.put("/{chat_id}/messages/{message_id}")
 async def edit_message(
     chat_id: int,
@@ -1238,6 +1273,7 @@ async def edit_message(
         _require_persistent_target(owner, target, model)
         await _rewrite_persistent_history(db, chat_id, user, mutation=mutate,
                                           use_tools=payload.use_tools)
+        artifact_refs.reclaim(db)
         if msg.role == "assistant":
             return {"status": "updated", "chat_id": chat_id}
         history, summary = _context_of(db, chat_id)
@@ -1253,6 +1289,7 @@ async def edit_message(
         if binding is not None:
             binding.snapshot_status = "absent"
     db.commit()
+    artifact_refs.reclaim(db)
     if msg.role == "assistant":
         return {"status": "updated", "chat_id": chat_id}
     history, summary = _context_of(db, chat_id)
@@ -1299,6 +1336,7 @@ async def fork_entire_conversation(
         )
         db.add(duplicate)
         db.flush()
+        artifact_refs.copy_references(db, message.id, duplicate.id)
     db.commit()
     return {"chat_id": child.id, "source_chat_id": chat_id}
 
@@ -1354,6 +1392,7 @@ async def fork_chat(
         db.add(copy)
         db.flush()
         copied[m.id] = copy.id
+        artifact_refs.copy_references(db, m.id, copy.id)
     # The summary travels with the fork only if everything it covers came along — a fork taken
     # from inside the summarised range would otherwise inherit a summary of its own future.
     if chat.summary and chat.summary_upto_id in copied:

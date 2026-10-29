@@ -500,7 +500,7 @@ describe("Sidebar selection behaviour", () => {
     fireEvent.click(screen.getByRole("checkbox", {
       name: "Select Chat 1",
     }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
     expect(screen.queryByText("1 selected")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Select" }));
     expect(screen.getByText("0 selected")).toBeTruthy();
@@ -632,7 +632,7 @@ describe("Sidebar search entry (step 1)", () => {
     const input = screen.getByRole("searchbox", { name: "Search conversations" });
     expect(document.activeElement).toBe(input);
     expect(screen.getByText("Chat 1")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(screen.queryByRole("searchbox", { name: "Search conversations" })).toBeNull();
     expect(screen.getByText("Chat 1")).toBeTruthy();
   });
@@ -640,7 +640,7 @@ describe("Sidebar search entry (step 1)", () => {
 
 
 describe("Sidebar search results (step 2)", () => {
-  test("shows debounced results above conversation groups, then Back restores the list", async () => {
+  test("shows debounced results above conversation groups, then Search closes results and restores the list", async () => {
     const { api } = await import("../api.js");
     const spy = vi.spyOn(api, "searchMessages").mockResolvedValue({
       total: 1, results: [{ message_id: 42, chat_id: 1, chat_title: "Driver diagnostics", content: "CUDA driver failed", role: "user", archived: false }],
@@ -657,7 +657,7 @@ describe("Sidebar search results (step 2)", () => {
       expect(screen.getByText("Chat 1")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Open search result from Driver diagnostics" }));
       expect(view.props.onSearchResult).toHaveBeenCalledWith(1, 42);
-      fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
       expect(screen.queryByLabelText("Search results")).toBeNull();
       expect(screen.getByText("Chat 1")).toBeTruthy();
     } finally { spy.mockRestore(); }
@@ -671,7 +671,7 @@ describe("Sidebar search results (step 2)", () => {
       fireEvent.click(screen.getByRole("button", { name: "Search" }));
       fireEvent.change(screen.getByRole("searchbox", { name: "Search conversations" }), { target: { value: "CUDA" } });
       await act(async () => { await vi.advanceTimersByTimeAsync(260); });
-      fireEvent.click(screen.getByRole("button", { name: "Back from search" }));
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
       await act(async () => { resolveRequest({ total: 1, results: [{ message_id: 9, chat_id: 1, chat_title: "Stale result", content: "late" }] }); });
       expect(screen.queryByText("Stale result")).toBeNull();
     } finally { spy.mockRestore(); }

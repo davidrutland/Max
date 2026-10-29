@@ -46,7 +46,7 @@ describe("MessageItem", () => {
 
   test("with model_used the copy + delete buttons are rendered", () => {
     const { container } = draw(assistant);
-    expect(container.querySelectorAll("button")).toHaveLength(2);
+    expect(container.querySelectorAll("button")).toHaveLength(3);
   });
 
   test("a user message renders copy + edit + delete (3 buttons)", () => {

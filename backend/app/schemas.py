@@ -185,6 +185,13 @@ class ChatUpdate(BaseModel):
     mode: Literal["chat", "agent"] | None = None
 
 
+class PublishedArtifactOut(BaseModel):
+    id: str
+    filename: str
+    mime_type: str
+    size: int
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -193,6 +200,7 @@ class MessageOut(BaseModel):
     content: str
     images: list[str] | None = None  # list of base64 data-URIs (images on a user message)
     attachments: list[AttachmentOut] | None = None  # document attachments (name only is returned)
+    published_artifacts: list[PublishedArtifactOut] = []
     model_used: str | None
     server_used: str | None
     tokens_per_sec: float | None = None

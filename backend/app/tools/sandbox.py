@@ -1,6 +1,8 @@
 """Sandbox tools backed by the OpenHands agent-server HTTP API."""
 
 import asyncio
+import base64
+import secrets
 import shlex
 from pathlib import Path
 
@@ -357,3 +359,93 @@ registry.register(
         mutating=False,
     )
 )
+
+
+# Executed inside OpenHands, where /workspace is actually mounted. Resolve each
+# component using O_NOFOLLOW and copy from the verified descriptor, not a path.
+_SNAPSHOT_SCRIPT = r"""
+import os, sys, stat
+parts = sys.argv[1].split('/')
+name = sys.argv[2]
+root = os.open('/workspace', os.O_RDONLY | os.O_DIRECTORY)
+fd = root
+try:
+    for index, part in enumerate(parts):
+        if not part or part in ('.', '..'):
+            raise ValueError('invalid path component')
+        next_fd = os.open(part, os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if index < len(parts) - 1 else os.O_NONBLOCK), dir_fd=fd)
+        if fd != root:
+            os.close(fd)
+        fd = next_fd
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError('not a regular file')
+    if st.st_size > 100 * 1024 * 1024:
+        raise ValueError('attachment exceeds size limit')
+    target = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=root)
+    try:
+        count = 0
+        while True:
+            block = os.read(fd, 1024 * 1024)
+            if not block: break
+            count += len(block)
+            if count > 100 * 1024 * 1024: raise ValueError('attachment exceeds size limit')
+            os.write(target, block)
+    finally:
+        os.close(target)
+except Exception:
+    try: os.unlink(name, dir_fd=root)
+    except OSError: pass
+    raise
+finally:
+    if fd != root: os.close(fd)
+    os.close(root)
+"""
+
+
+
+async def fetch_attachment(path: str) -> bytes:
+    """Download a no-symlink snapshot made inside the OpenHands workspace."""
+    path = _path(path)
+    relative = str(Path(path).relative_to(WORKSPACE))
+    if relative == '.':
+        raise ValueError('attachment must be a regular file')
+    snapshot = '.max-attachment-' + secrets.token_hex(20)
+    script = base64.b64encode(_SNAPSHOT_SCRIPT.encode()).decode()
+    command = (
+        'python3 -c ' + shlex.quote('import base64; exec(base64.b64decode(' + repr(script) + '))')
+        + ' ' + shlex.quote(relative) + ' ' + shlex.quote(snapshot)
+    )
+    result = await _exec(command, str(WORKSPACE), 45)
+    if not result.startswith('exit_code=0'):
+        raise ValueError('could not securely snapshot attachment: ' + result[:300])
+    cid = await _conversation()
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            async with client.stream('GET', f'{BASE_URL}/api/conversations/{cid}/file/download', params={'path': str(WORKSPACE / snapshot)}) as response:
+                response.raise_for_status()
+                chunks, total = [], 0
+                from app.artifact_store import MAX_BYTES
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_BYTES:
+                        raise ValueError('attachment exceeds size limit')
+                    chunks.append(chunk)
+                return b''.join(chunks)
+    finally:
+        await _exec('rm -f -- ' + shlex.quote(str(WORKSPACE / snapshot)), str(WORKSPACE), 15)
+
+
+async def _sandbox_attach(args: dict) -> str:
+    try:
+        return _path(args.get("path", ""))
+    except ValueError as exc:
+        return f"{ERROR_PREFIX} {exc}"
+
+
+registry.register(Tool(
+    name="sandbox_attach",
+    description="Attach an existing file from /workspace to this chat. Max automatically shows an Open control with Preview and Download; do not invent or include a separate download URL in your reply. Simply say the file is attached.",
+    parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+    handler=_sandbox_attach, source="sandbox", mutating=False,
+))

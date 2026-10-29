@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import CORS_ORIGINS
-from app.database import init_db
-from app.routers import servers, chats, config, extract, auth, users, mcp, search, router_control
+from app.database import init_db, SessionLocal
+from app.artifact_store import reconcile
+from app.routers import servers, chats, config, extract, auth, users, mcp, search, router_control, artifacts
 from app.tools import mcp_client
 from app.context_startup import context_owner_lifespan
 
@@ -14,6 +15,8 @@ from app.context_startup import context_owner_lifespan
 async def lifespan(_app: FastAPI):
     # Was @app.on_event("startup") (deprecated); MCP needs an async startup hook anyway.
     init_db()
+    with SessionLocal() as db:
+        reconcile(db)
     # Connect to the configured MCP servers and register their tools. Best effort: an
     # unreachable server must not stop the app from booting.
     await mcp_client.sync_all()
@@ -40,6 +43,7 @@ app.include_router(extract.router)
 app.include_router(mcp.router)
 app.include_router(search.router)
 app.include_router(router_control.router)
+app.include_router(artifacts.router)
 
 
 @app.get("/api/health")
