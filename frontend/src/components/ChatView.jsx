@@ -229,11 +229,13 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     // Check before touching Buun or clearing the draft. The server also checks
     // again before committing the message, so this UI is advisory, not security.
     const proposed = { content, images: imgs, attachments: atts, serverId: chosenServer, model: chosenModel, useTools: chosenTools, askEveryTool: chosenAsk, continueOriginal };
+    let eligibleForPersistence = persistent;
     if (persistent && !confirmedChange) {
       contextBusyRef.current = true;
       setContextBusy(true);
       try {
         const decision = await api.checkContextCompatibility(chat.id, proposed);
+        eligibleForPersistence = decision.enabled;
         if (decision.requires_confirmation) {
           setSettingsConflict({ reasons: decision.reasons, chatId: chat.id, proposed });
           return;
@@ -247,7 +249,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
       }
     }
 
-    if (persistent && !confirmedChange && (!contextActive || !currentContextStatus.initialized)) {
+    if (eligibleForPersistence && !confirmedChange && (!contextActive || !currentContextStatus.initialized)) {
       contextBusyRef.current = true;
       setContextBusy(true);
       try {

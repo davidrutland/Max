@@ -527,21 +527,18 @@ def build_stream_response(
 
     lines = context_turn_boundary.wrap(generate(), enabled=False)
 
-    if config.CONTEXT_PERSISTENCE_MODE != "disabled":
+    owner = _persistent_owner_for_target(target, model)
+    if owner is not None:
         try:
-            owner = slot_owners.require()
-            if owner.capability is None or owner.backend_identity is None:
-                raise ContextRouteSelectionError("Verified Buun owner is not configured")
             selection = select_context_route(
                 mode=config.CONTEXT_PERSISTENCE_MODE,
                 capability=owner.capability,
                 owners=slot_owners,
             )
-        except (ContextRouteSelectionError, SlotOwnerError) as exc:
-            raise HTTPException(503, str(exc)) from exc
+        except (ContextRouteSelectionError, SlotOwnerError):
+            selection = None
 
-        if selection.persistent:
-            _require_persistent_target(owner, target, model)
+        if selection is not None and selection.persistent:
             if user_id is None:
                 raise HTTPException(503, "Authenticated user required")
             base_identity = binding_base_for_target(
@@ -780,6 +777,22 @@ async def delete_chat(
 
 
 
+def _persistent_owner_for_target(target: dict, model: str):
+    """Persistence is optional; only the configured owner may use its KV slot."""
+    if config.CONTEXT_PERSISTENCE_MODE != "auto":
+        return None
+    try:
+        owner = slot_owners.require()
+        configured = owner.coordinator._transport.transport.target
+        if (owner.capability is None or owner.backend_identity is None or
+                owner.server_id is None or target.get("id") != owner.server_id or
+                model != configured.alias):
+            return None
+        return owner
+    except (SlotOwnerError, AttributeError):
+        return None
+
+
 def _require_persistent_target(owner, target: dict, model: str) -> None:
     """A persistent turn must use the router target owning the slot."""
     configured = owner.coordinator._transport.transport.target
@@ -910,14 +923,13 @@ async def check_chat_context_compatibility(
                                    _legacy_original_model(db, chat_id, payload.model)),
                 "original_use_tools": use_tools}
     target, model = resolve_target(db, payload.server_id, payload.model)
-    try:
-        owner = slot_owners.require()
-    except SlotOwnerError as exc:
-        raise HTTPException(503, "No verified inference-slot owner") from exc
-    if owner.capability is None or owner.backend_identity is None:
-        raise HTTPException(503, "Verified Buun owner is not configured")
-    if owner.server_id is None or target.get("id") != owner.server_id:
-        raise HTTPException(409, "Selected server differs from persistent Buun server")
+    owner = _persistent_owner_for_target(target, model)
+    if owner is None:
+        binding = get_binding(db, chat_id, user.id)
+        return {"enabled": False, "compatible": binding is None,
+                "requires_confirmation": binding is not None,
+                "reasons": ["Selected model or server cannot reuse the SSD checkpoint; full prefill will be used"] if binding else [],
+                "initialized": False}
 
     history, summary = _context_of(db, chat_id)
     history.append({
@@ -958,15 +970,9 @@ async def initialize_chat_context(
     _ensure_idle(chat_id)
     target, model = resolve_target(db, payload.server_id, payload.model)
 
-    try:
-        owner = slot_owners.require()
-    except SlotOwnerError as exc:
-        raise HTTPException(503, "No verified inference-slot owner") from exc
-
-    if owner.capability is None or owner.backend_identity is None:
-        raise HTTPException(503, "Verified Buun owner is not configured")
-
-    _require_persistent_target(owner, target, model)
+    owner = _persistent_owner_for_target(target, model)
+    if owner is None:
+        return {"initialized_chat_id": chat_id, "persistent": False}
 
     history, summary = _context_of(db, chat_id)
     history.append({
@@ -1082,15 +1088,8 @@ async def send_message(
         original_prompt = (original_binding.effective_system_prompt
                            if original_binding else None)
 
-    if config.CONTEXT_PERSISTENCE_MODE == "auto":
-        try:
-            owner = slot_owners.require()
-        except SlotOwnerError as exc:
-            raise HTTPException(503, "No verified inference-slot owner") from exc
-        if owner.capability is None or owner.backend_identity is None:
-            raise HTTPException(503, "Verified Buun owner is not configured")
-        _require_persistent_target(owner, target, model)
-
+    owner = _persistent_owner_for_target(target, model)
+    if owner is not None:
         # Fail before writing the user message. The read-only compatibility
         # endpoint is advisory; Send must independently enforce the binding.
         binding = get_binding(db, chat_id, user.id)
@@ -1138,7 +1137,7 @@ async def send_message(
     # A disabled-mode turn can extend a conversation with an older Buun SSD
     # checkpoint. Invalidate its binding in the same transaction as the new
     # message, so a later auto-mode restart rebuilds from DB history.
-    if config.CONTEXT_PERSISTENCE_MODE == "disabled":
+    if owner is None:
         binding = get_binding(db, chat.id, user.id)
         if binding is not None:
             binding.snapshot_status = "absent"

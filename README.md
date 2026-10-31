@@ -183,6 +183,12 @@ Changing the selected **model name**, effective system prompt, or available tool
 
 In `disabled` mode, normal chat remains available without SSD coordination or configuration-change warnings. Changes made in this mode must not later restore an outdated checkpoint when persistence is re-enabled.
 
+### Known issue: intermittent CUDA failures when switching models
+
+**Status: Under investigation (31 October 2026).** Repeatedly switching between model aliases using Buun's single-model router (`--models-max 1`) can intermittently crash the inference child process. Observed failures include CUDA illegal-memory-access errors and `cublasCreate_v2` resource-allocation failures. The problem has reproduced with Max SSD persistence both enabled and disabled; its cause has **not** been established. Single-model operation with SSD persistence has been stable in extended use, and model switching worked previously before the current persistence integration.
+
+**Recommended workaround:** For reliability, use one model rather than repeatedly switching models. Switching is not intentionally disabled, but a switch may lead to an inference failure. This warning does not change the existing Continue / Fork / Cancel behaviour for checkpoint-incompatible configuration changes, nor does it bypass genuine checkpoint-save or slot-recovery errors. No confirmed fix or resolution date is available.
+
 ### Caveats and warnings
 
 - **Use the tested Buun build** (reference commit above) or explicitly verify save, restore, erase, and compressed-KV compatibility before enabling `auto`. Other llama.cpp forks and generic OpenAI-compatible servers are not automatically compatible.

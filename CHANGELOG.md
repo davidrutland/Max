@@ -1,5 +1,22 @@
 ## Max
 
+### 2026-10-31 — Non-default model loading with SSD persistence enabled
+
+#### Fixed (local changes awaiting validation)
+
+- Models other than the configured default `Max` model are no longer rejected solely because SSD persistence is enabled. When a selected model or server is not eligible for the configured Buun checkpoint owner, Max uses ordinary inference without restoring that checkpoint.
+- The frontend skips SSD context initialization for ineligible model selections. Existing checkpoint bindings are invalidated after non-persistent turns to avoid later reuse of stale context.
+- Existing compatibility confirmation for changes to a checkpoint's model, system prompt, or tools remains in place; genuine checkpoint and recovery errors continue to block unsafe operations.
+
+#### Known issue
+
+- Separately, repeated model switching in Buun router mode (`--models-max 1`) has intermittently caused CUDA failures with persistence both enabled and disabled. The cause remains unconfirmed; single-model operation is recommended for reliability. See README.
+
+#### Validation
+
+- Behaviour described from the supplied working-tree changes; no new functional test results are claimed.
+
+
 ### 2026-10-29 — Sandbox attachments and portable previews
 
 #### Added
