@@ -19,8 +19,12 @@ import { useT } from "../i18n.js";
 export default function ChatView({ chat, servers, hostTools, onMessageSent, onForked, onOpenSettings, onBack, searchTarget, forkDraft, onForkDraftConsumed }) {
   const t = useT();
   const { serverId, model, setTarget, upServers, selectedServer } = useServerModel(servers);
+  const [contextStatus, setContextStatus] = useState(null);
   const [readinessRefresh, setReadinessRefresh] = useState(0);
-  const modelReadiness = useModelReadiness(model, true, readinessRefresh);
+  const routerTarget = contextStatus?.enabled === true &&
+    contextStatus.owner_server_id === serverId && contextStatus.owner_model === model;
+  const modelReadiness = useModelReadiness(model, routerTarget, readinessRefresh);
+  const modelReady = !routerTarget || modelReadiness.ready;
   const [switchingModel, setSwitchingModel] = useState(false);
 
   async function handleModelSelection(target) {
@@ -36,7 +40,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
     setSwitchingModel(true);
     try {
-      if (persistent) await api.selectRouterModel(target.model);
+      if (persistent && contextStatus?.owner_server_id === target.serverId && contextStatus?.owner_model === target.model) await api.selectRouterModel(target.model);
       setTarget(target);
     } catch (error) {
       window.alert(`Model selection failed: ${error.message}`);
@@ -46,7 +50,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   }
 
   async function loadSelectedModel() {
-    if (!model || switchingModel || stream.sending) return;
+    if (!routerTarget || !model || switchingModel || stream.sending) return;
     setSwitchingModel(true);
     try {
       await api.selectRouterModel(model);
@@ -63,7 +67,6 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const [compacting, setCompacting] = useState(null); // {chars} while a summary is being written
   const compactAbortRef = useRef(null);
 
-  const [contextStatus, setContextStatus] = useState(null);
   const [contextBusy, setContextBusy] = useState(false);
   const [settingsConflict, setSettingsConflict] = useState(null);
   const contextBusyRef = useRef(false);
@@ -128,7 +131,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const [editTarget, setEditTarget] = useState({ serverId: null, model: "" });
 
   const supportsVision = !!selectedServer?.vision_models?.includes(model);
-  const canSend = (!!input.trim() || !!images.length || !!attachments.length) && !!serverId && !!model && modelReadiness.ready && !switchingModel;
+  const canSend = (!!input.trim() || !!images.length || !!attachments.length) && !!serverId && !!model && modelReady && !switchingModel;
 
   useEffect(() => {
     localStorage.setItem(USE_TOOLS_KEY, useTools ? "1" : "0");
@@ -311,14 +314,14 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     }
     // Wait for the new chat's status and model readiness. The previous code
     // consumed the draft while the new model could still be loading.
-    if (currentContextStatus === null || !modelReadiness.ready || contextBusyRef.current) return;
+    if (currentContextStatus === null || !modelReady || contextBusyRef.current) return;
     forkStartedRef.current = chat.id;
     setInput(forkDraft.content);
     setImages(forkDraft.images || []);
     setAttachments(forkDraft.attachments || []);
     onForkDraftConsumed();
     handleSend(forkDraft).catch((error) => stream.flashError(error.message));
-  }, [forkDraft, currentContextStatus, chat.id, serverId, model, modelReadiness.ready]);
+  }, [forkDraft, currentContextStatus, chat.id, serverId, model, modelReady]);
 
   async function resolveSettingsConflict(choice) {
     const conflict = settingsConflict;
@@ -488,7 +491,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         )}
         <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1 md:flex-none">
           <ServerModelPicker servers={upServers} value={{ serverId, model }} onChange={handleModelSelection} />
-          {model && (
+          {model && routerTarget && (
             <span
               role="status"
               aria-live="polite"
@@ -505,7 +508,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
               })[modelReadiness.status] || modelReadiness.status}
             </span>
           )}
-          {model && modelReadiness.status === "unloaded" && (
+          {model && routerTarget && modelReadiness.status === "unloaded" && (
             <button type="button" onClick={loadSelectedModel}
               disabled={switchingModel || stream.sending}
               className="rounded border border-neutral-500 px-2.5 py-1 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-50">

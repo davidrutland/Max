@@ -1,5 +1,17 @@
 ## Max
 
+### 2026-11-01 — Direct llama.cpp model readiness
+
+#### Fixed
+
+- Direct llama.cpp models no longer depend on Buun router readiness checks before sending messages. The previous check could leave a selected direct GGUF model in an `unknown` state and disable Send.
+- Context status now identifies the configured Buun persistence owner, allowing router-specific readiness and model-selection calls to be restricted to that owner.
+- Non-default models continue to use ordinary inference without requiring a Buun SSD checkpoint owner.
+
+#### Validation
+
+- Live checks confirmed direct llama.cpp inference, Buun `Max` with SSD persistence, and non-default Buun model loading and inference.
+
 ### 2026-10-31 — Non-default model loading with SSD persistence enabled
 
 #### Fixed (local changes awaiting validation)

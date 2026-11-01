@@ -847,6 +847,8 @@ def context_persistence_status(
         "enabled": True,
         "active_chat_id": active_id,
         "initialized": initialized,
+        "owner_server_id": owner.server_id,
+        "owner_model": owner.coordinator._transport.transport.target.alias,
     }
 
 
