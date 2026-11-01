@@ -21,7 +21,7 @@ from app.context_binding_adapter import binding_base_for_target
 from app.context_binding_registration import initialize_and_register
 from app.context_turn_preflight import ContextPreflightError
 from app.context_binding_repository import BindingError, get_binding
-from app.context_live_coordinator import LiveContextError
+from app.context_live_coordinator import LiveContextError, _verified_file
 from app.context_orchestrator import ContextSwitchError
 from app.buun_prefill import prefill_messages, PrefillUnsupported
 from app.buun_router import resolve_loaded_model, BuunRouterError
@@ -802,6 +802,52 @@ def _require_persistent_target(owner, target: dict, model: str) -> None:
         raise HTTPException(409, "Selected server differs from the persistent Buun server")
 
 
+def _checkpoint_current(db, chat_id: int, user_id: int, coordinator) -> bool:
+    """Conservative: a verified committed file, and no dirty/uncertain live slot."""
+    binding = get_binding(db, chat_id, user_id)
+    if binding is None or binding.snapshot_status != "ready" or not binding.snapshot_path:
+        return False
+    orch = coordinator.orchestrator
+    if orch.uncertain:
+        return False
+    if orch.active_chat == str(chat_id) and orch.dirty:
+        return False
+    return _verified_file(coordinator.store, binding.snapshot_path)
+
+
+@router.post("/{chat_id}/context/save")
+async def save_chat_context(
+    chat_id: int,
+    user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    _owned_chat(db, chat_id, user)
+    if config.CONTEXT_PERSISTENCE_MODE != "auto":
+        raise HTTPException(409, "SSD persistence is disabled")
+    try:
+        owner = slot_owners.require()
+    except SlotOwnerError as exc:
+        raise HTTPException(503, "No verified inference-slot owner") from exc
+    if owner.capability is None or owner.backend_identity is None or owner.server_id is None:
+        raise HTTPException(503, "No verified persistence owner")
+    # The same lock protects inference, activation, and checkpoint replacement.
+    async with owner.lock:
+        _ensure_idle(chat_id)
+        coordinator = owner.coordinator
+        orch = coordinator.orchestrator
+        if orch.uncertain or orch.active_chat != str(chat_id):
+            raise HTTPException(409, "Chat does not own a verified active context")
+        if get_binding(db, chat_id, user.id) is None:
+            raise HTTPException(409, "Chat has no initialized persistent context")
+        try:
+            await coordinator.save_active()
+        except (ContextSwitchError, LiveContextError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if not _checkpoint_current(db, chat_id, user.id, coordinator):
+            raise HTTPException(409, "Checkpoint could not be verified")
+        return {"saved": True, "checkpoint_current": True}
+
+
 @router.get("/context/status")
 def context_persistence_status(
     chat_id: int | None = None,
@@ -843,10 +889,15 @@ def context_persistence_status(
         if chat_id is not None else False
     )
 
+    checkpoint_current = (
+        _checkpoint_current(db, chat_id, user.id, owner.coordinator)
+        if chat_id is not None and initialized else False
+    )
     return {
         "enabled": True,
         "active_chat_id": active_id,
         "initialized": initialized,
+        "checkpoint_current": checkpoint_current,
         "owner_server_id": owner.server_id,
         "owner_model": owner.coordinator._transport.transport.target.alias,
     }
@@ -1548,4 +1599,18 @@ async def compact_chat(
             save_db.close()
         yield json.dumps({"type": "compacted", "summary_upto_id": upto}) + "\n"
 
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    # Compaction on the persistent owner shares the inference slot with saving.
+    # Hold the same lock throughout streaming; the compaction logic is unchanged.
+    owner = _persistent_owner_for_target(target, model)
+
+    async def guarded_generate():
+        if owner is None:
+            async for piece in generate():
+                yield piece
+        else:
+            async with owner.lock:
+                _ensure_idle(chat_id)
+                async for piece in generate():
+                    yield piece
+
+    return StreamingResponse(guarded_generate(), media_type="application/x-ndjson")

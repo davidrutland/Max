@@ -1,5 +1,14 @@
 ## Max
 
+### 2026-11-01 — Manual SSD context saving
+
+#### Added
+
+- Added a manual Save context button beside Settings for Buun-persistent conversations.
+- Added a green tick indicating a verified, up-to-date SSD checkpoint.
+- The tick clears when the live context changes and returns after successful saving.
+- Manual saving updates the existing checkpoint without changing the automatic checkpointing mechanism or context compression threshold.
+
 ### 2026-11-01 — Direct llama.cpp model readiness
 
 #### Fixed

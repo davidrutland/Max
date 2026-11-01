@@ -5,7 +5,7 @@ import MessageList from "./chat/MessageList.jsx";
 import ToolOutputModal from "./chat/ToolOutputModal.jsx";
 import ContextBar from "./chat/ContextBar.jsx";
 import Composer from "./chat/Composer.jsx";
-import { CompactIcon, SettingsIcon } from "./icons.jsx";
+import { CompactIcon, SaveIcon, SettingsIcon } from "./icons.jsx";
 import { useChatStream } from "../hooks/useChatStream.js";
 import { useServerModel } from "../hooks/useServerModel.js";
 import useModelReadiness from "../hooks/useModelReadiness.js";
@@ -68,6 +68,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const compactAbortRef = useRef(null);
 
   const [contextBusy, setContextBusy] = useState(false);
+  const [savingContext, setSavingContext] = useState(false);
   const [settingsConflict, setSettingsConflict] = useState(null);
   const contextBusyRef = useRef(false);
   const contextChatIdRef = useRef(chat?.id);
@@ -113,6 +114,21 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
       clearTimeout(retryTimer);
     };
   }, [chat?.id]);
+
+  useEffect(() => {
+    if (!routerTarget || !chat?.id || stream.sending) return;
+    refreshContextStatus(chat.id).catch(() => {});
+  }, [chat?.id, chat?.updated_at, routerTarget, stream.sending]);
+
+  // Refresh the tick after background/automatic checkpoint writes and other tabs.
+  useEffect(() => {
+    if (!routerTarget || !chat?.id || stream.sending || savingContext) return;
+    const id = chat.id;
+    const timer = setInterval(() => {
+      refreshContextStatus(id).catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [chat?.id, routerTarget, stream.sending, savingContext]);
 
   const [input, setInput] = useState("");
   const [images, setImages] = useState([]); // attached images (data-URI), until sent
@@ -216,7 +232,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   }
 
   async function handleSend(override = null) {
-    if ((!override && !canSend) || stream.sending || contextBusyRef.current) return;
+    if ((!override && !canSend) || stream.sending || savingContext || contextBusyRef.current) return;
     const content = override ? override.content : input.trim();
     const imgs = override ? override.images : images;
     const atts = override ? override.attachments : attachments;
@@ -422,9 +438,24 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     );
   }
 
+  async function handleSaveContext() {
+    if (!routerTarget || !persistent || !currentContextStatus?.initialized ||
+        !contextActive || savingContext || compacting || stream.sending ||
+        chat.active_turn || contextBusy || switchingModel) return;
+    setSavingContext(true);
+    try {
+      await api.saveChatContext(chat.id);
+      await refreshContextStatus(chat.id);
+    } catch (error) {
+      stream.flashError(error.message);
+    } finally {
+      setSavingContext(false);
+    }
+  }
+
   // Compaction (#62): always user-triggered. Uses the model picked in the header.
   async function handleCompact() {
-    if (compacting || stream.sending || !serverId || !model) return;
+    if (compacting || savingContext || stream.sending || !serverId || !model) return;
     const ctrl = new AbortController();
     compactAbortRef.current = ctrl;
     setCompacting({ chars: 0 });
@@ -532,16 +563,37 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         {chat.compactable && (
           <button
             onClick={handleCompact}
-            disabled={!!compacting || stream.sending}
+            disabled={!!compacting || savingContext || stream.sending}
             className={`${hostTools ? "" : "ml-auto "}shrink-0 text-neutral-300 opacity-70 hover:opacity-100 disabled:opacity-30`}
             title={t("compact.buttonTitle")}
           >
             <CompactIcon className="w-5 h-5" />
           </button>
         )}
+        {routerTarget && persistent && currentContextStatus?.initialized && (
+          <button
+            type="button"
+            onClick={handleSaveContext}
+            disabled={savingContext || !!compacting || stream.sending || chat.active_turn ||
+              !contextActive || contextBusy || switchingModel}
+            className={`${chat.compactable || hostTools ? "" : "ml-auto "}relative shrink-0 text-neutral-300 opacity-70 hover:opacity-100 disabled:opacity-30`}
+            title={savingContext ? "Saving context…" : "Save context to SSD"}
+            aria-label="Save context to SSD"
+          >
+            <SaveIcon className={`w-5 h-5 ${savingContext ? "animate-pulse" : ""}`} />
+            {!savingContext && !stream.sending && !chat.active_turn &&
+              !compacting && !contextBusy && currentContextStatus.checkpoint_current && (
+              <svg className="absolute -right-1 -bottom-1 w-3 h-3 text-green-400"
+                viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m3 8 3 3 7-7" />
+              </svg>
+            )}
+          </button>
+        )}
         <button
           onClick={onOpenSettings}
-          className={`${chat.compactable || hostTools ? "" : "ml-auto "}shrink-0 text-neutral-300 opacity-70 hover:opacity-100`}
+          className={`${chat.compactable || hostTools || (routerTarget && persistent && currentContextStatus?.initialized) ? "" : "ml-auto "}shrink-0 text-neutral-300 opacity-70 hover:opacity-100`}
           title={t("common.settings")}
         >
           <SettingsIcon className="w-5 h-5" />
@@ -577,7 +629,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         onSend={handleSend}
         onStop={stream.stop}
         sending={stream.sending}
-        canSend={canSend && currentContextStatus !== null && !contextBusy}
+        canSend={canSend && currentContextStatus !== null && !contextBusy && !savingContext && !compacting}
         images={images}
         onRemoveImage={(i) => setImages(images.filter((_, j) => j !== i))}
         attachments={attachments}

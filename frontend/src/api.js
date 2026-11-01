@@ -142,6 +142,7 @@ export const api = {
       body: JSON.stringify(normalizeTarget(serverId, model)),
     }),
   getContextStatus: (chatId) => request(`/chats/context/status?chat_id=${encodeURIComponent(chatId)}`),
+  saveChatContext: (id) => request(`/chats/${id}/context/save`, { method: "POST" }),
   activateChatContext: (id) =>
     request(`/chats/${id}/context/activate`, { method: "POST" }),
   updateChat: (id, data) => request(`/chats/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
