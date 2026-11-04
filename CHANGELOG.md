@@ -1,5 +1,14 @@
 ## Max
 
+### 2026-11-04 — Sandbox image inspection
+
+#### Added
+- Sandbox image inspection: Max can now visually inspect images stored in its OpenHands sandbox using the `sandbox_view_image` tool.
+- Supports PNG, JPEG, WebP, GIF (first frame), BMP, TIFF, AVIF and SVG/SVGZ.
+- Automatically resizes images to a configurable maximum dimension (720px by default), preserving aspect ratio without upscaling.
+- Applies input-size and decoded-pixel limits, with SVG external-resource loading disabled.
+- Added automated tests for image conversion, resizing, supported formats, sandbox access and SVG security restrictions.
+
 ### 2026-11-01 — Manual SSD context saving
 
 #### Added

@@ -4,6 +4,8 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache cairo
+
 COPY requirements.txt .
 # --only-binary=:all: is a guard, not an optimisation: every dependency currently ships a
 # musllinux wheel, and this makes the build FAIL LOUDLY the day one stops. Without it pip

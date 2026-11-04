@@ -146,3 +146,15 @@ APPROVAL_TIMEOUT = 300.0
 # without pings would land exactly on APPROVAL_TIMEOUT above. Traefik is not the constraint: its
 # idleTimeout applies to idle keep-alive connections, not a response in flight.
 APPROVAL_HEARTBEAT = 20.0
+
+
+def parse_sandbox_vision_max_dimension(value: str) -> int:
+    dimension = int(value)
+    if not 64 <= dimension <= 4096:
+        raise ValueError("SANDBOX_VISION_MAX_DIMENSION must be between 64 and 4096")
+    return dimension
+
+
+SANDBOX_VISION_MAX_DIMENSION = parse_sandbox_vision_max_dimension(
+    os.environ.get("SANDBOX_VISION_MAX_DIMENSION", "720")
+)

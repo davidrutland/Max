@@ -27,3 +27,7 @@ PyJWT==2.13.0
 # MCP client (Streamable HTTP + the older HTTP+SSE transport). Pulls pyjwt[crypto], so
 # `cryptography` is now available without adding a dependency of its own.
 mcp==1.28.1
+
+Pillow==12.0.0
+CairoSVG==2.8.2
+defusedxml==0.7.1
