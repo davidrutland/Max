@@ -1,5 +1,21 @@
 ## Max
 
+### 2026-11-04 — Chat attachment import into OpenHands
+
+#### Added
+- Added `sandbox_import_upload`, allowing Max to import user-attached files directly into its OpenHands sandbox.
+- Supports ZIP, tar.gz, images and other binary files without automatic extraction.
+- Preserves original image files separately from their scaled vision representations.
+- Exposes attachment references to the model for sandbox imports.
+- Restricts imports to files owned by the authenticated user and attached to the active conversation.
+- Uses unique filenames under `/workspace` to avoid collisions.
+- Added automated tests covering sandbox imports, authorization and upload handling.
+
+#### Verified
+- ZIP and original-image imports passed live SHA-256 integrity checks.
+- Image import remained functional after a backend restart.
+- Existing image vision functionality remained operational.
+
 ### 2026-11-04 — Sandbox image inspection
 
 #### Added

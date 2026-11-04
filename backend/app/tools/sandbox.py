@@ -447,6 +447,41 @@ async def _sandbox_attach(args: dict) -> str:
         return f"{ERROR_PREFIX} {exc}"
 
 
+async def import_uploaded_file(source: Path, original_name: str, mime_type: str) -> str:
+    """Stream an already-authorized original upload to a unique workspace file."""
+    if not source.is_file() or source.is_symlink():
+        raise ValueError("uploaded file unavailable")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(original_name).name).strip("._")[:100] or "upload"
+    destination = str(WORKSPACE / ("max-upload-" + secrets.token_hex(12) + "-" + safe_name))
+    cid = await _conversation()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=15, write=120)) as client:
+            with source.open("rb") as handle:
+                response = await client.post(
+                    f"{BASE_URL}/api/conversations/{cid}/file/upload",
+                    params={"path": destination},
+                    files={"file": (safe_name, handle, mime_type or "application/octet-stream")},
+                )
+                response.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError("sandbox import failed") from exc
+    return destination
+
+
+async def _sandbox_import_upload(args: dict) -> str:
+    # The chat stream intercepts this tool and supplies the authenticated identity.
+    # Never accept an upload ID here without that context.
+    return f"{ERROR_PREFIX} import requires an authenticated chat turn"
+
+
+registry.register(Tool(
+    name="sandbox_import_upload",
+    description="Import an original file attached to this conversation into the OpenHands /workspace. Pass the upload_id displayed in the attachment reference. Returns the sandbox path. Does not extract archives.",
+    parameters={"type": "object", "properties": {"upload_id": {"type": "string"}}, "required": ["upload_id"]},
+    handler=_sandbox_import_upload, source="sandbox", mutating=False,
+))
+
+
 registry.register(Tool(
     name="sandbox_attach",
     description="Attach an existing file from /workspace to this chat. Max automatically shows an Open control with Preview and Download; do not invent or include a separate download URL in your reply. Simply say the file is attached.",

@@ -414,10 +414,15 @@ def build_stream_response(
                         }) + "\n"
 
                     try:
-                        result = await registry.execute(
-                            call["name"], args, approved=approved, privileged=privileged,
-                            strict=ask_every_tool,
-                        )
+                        if call["name"] == "sandbox_import_upload" and tool is not None and tools_config.is_enabled() and tools_config.tool_enabled(call["name"]) and not needs_yes:
+                            result = await _import_chat_upload(chat_id, user_id, args.get("upload_id"))
+                        elif call["name"] == "sandbox_import_upload" and tool is not None and tools_config.is_enabled() and tools_config.tool_enabled(call["name"]) and approved:
+                            result = await _import_chat_upload(chat_id, user_id, args.get("upload_id"))
+                        else:
+                            result = await registry.execute(
+                                call["name"], args, approved=approved, privileged=privileged,
+                                strict=ask_every_tool,
+                            )
                         ok = not result.startswith(ERROR_PREFIX)
                         if ok and call["name"] == "sandbox_attach":
                             # Ownership is derived from the authenticated turn, never model arguments.
@@ -657,6 +662,28 @@ def _validate_incoming_uploads(db, user, attachments):
             raise HTTPException(404, "Uploaded file not found")
 
 
+async def _import_chat_upload(chat_id: int, user_id: int | None, identifier: str) -> str:
+    """Authorize against the persisted chat message, not model-provided arguments."""
+    if user_id is None or not isinstance(identifier, str) or not identifier:
+        return f"{ERROR_PREFIX} upload not available"
+    from app.routers.uploads import ROOT
+    from app.tools.sandbox import import_uploaded_file
+    from app.upload_lifecycle import ids_in_chat
+    with SessionLocal() as db:
+        chat = db.get(models.Chat, chat_id)
+        if chat is None or chat.user_id != user_id or identifier not in ids_in_chat(db, chat_id):
+            return f"{ERROR_PREFIX} upload not attached to this conversation"
+        record = db.query(models.IncomingUpload).filter_by(id=identifier, user_id=user_id).first()
+        if record is None:
+            return f"{ERROR_PREFIX} upload unavailable"
+        filename, mime_type = record.filename, record.mime_type
+    try:
+        path = await import_uploaded_file(ROOT / identifier, filename, mime_type)
+    except (ValueError, RuntimeError):
+        return f"{ERROR_PREFIX} sandbox import failed"
+    return f"Imported {filename} into {path}"
+
+
 def _inject_attachments(messages: list[dict]) -> list[dict]:
     """Prepends attachment text to the relevant message's content as context."""
     out = []
@@ -664,6 +691,10 @@ def _inject_attachments(messages: list[dict]) -> list[dict]:
         # Keyed on `text` on purpose: a chip may also carry `detail`, which is what the tool
         # returned, kept for the UI to display. Injecting that would re-send a documentation
         # dump on every later turn — the exact cost this split avoids.
+        binary_refs = [a for a in (m.get("attachments") or []) if a.get("upload_id")]
+        if binary_refs:
+            refs = "\n".join(f"Attached original file: {a.get('name', 'file')} (upload_id: {a['upload_id']}). Use sandbox_import_upload to access its bytes." for a in binary_refs)
+            m = {**m, "content": refs + "\n\n" + (m.get("content") or "")}
         atts = [a for a in (m.get("attachments") or []) if a.get("text")]
         if atts:
             prefix = "".join(_wrap_untrusted(f"Ek: {a['name']}", a["text"]) + "\n\n" for a in atts)

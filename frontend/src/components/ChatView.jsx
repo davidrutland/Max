@@ -131,7 +131,8 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   }, [chat?.id, routerTarget, stream.sending, savingContext]);
 
   const [input, setInput] = useState("");
-  const [images, setImages] = useState([]); // attached images (data-URI), until sent
+  const [images, setImages] = useState([]); // scaled vision images
+  const [imageUploadIds, setImageUploadIds] = useState([]); // original bytes, aligned with images
   const [attachments, setAttachments] = useState([]); // attached documents {name, text}
   const [pending, setPending] = useState({ user: null, images: [], attachments: [] });
   const [lightbox, setLightbox] = useState(null); // image to display full size (data-URI)
@@ -205,9 +206,19 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     }
     const imgs = supportsVision ? files.filter((f) => f.type.startsWith("image/")) : [];
     const docs = files.filter((f) => !f.type.startsWith("image/"));
-    if (imgs.length) {
-      const urls = await Promise.all(imgs.map((f) => fileToScaledDataUrl(f)));
-      setImages((prev) => [...prev, ...urls]);
+    for (const f of imgs) {
+      let uploaded;
+      try {
+        // The original is stored separately from the scaled vision representation.
+        uploaded = await api.uploadBinary(f);
+        const url = await fileToScaledDataUrl(f);
+        setImages((prev) => [...prev, url]);
+        setImageUploadIds((prev) => [...prev, uploaded.id]);
+        setAttachments((prev) => [...prev, { name: uploaded.name, upload_id: uploaded.id }]);
+      } catch (e) {
+        if (uploaded?.id) api.deleteUnusedUpload(uploaded.id).catch(() => {});
+        stream.flashError(`${f.name}: ${e.message}`);
+      }
     }
     for (const f of docs) {
       try {
@@ -304,6 +315,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
     setInput("");
     setImages([]);
+    setImageUploadIds([]);
     setAttachments([]);
     setPending({ user: content, images: imgs, attachments: atts });
 
@@ -341,6 +353,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     forkStartedRef.current = chat.id;
     setInput(forkDraft.content);
     setImages(forkDraft.images || []);
+    setImageUploadIds((forkDraft.images || []).map(() => null));
     setAttachments(forkDraft.attachments || []);
     onForkDraftConsumed();
     handleSend(forkDraft).catch((error) => stream.flashError(error.message));
@@ -638,12 +651,27 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         sending={stream.sending}
         canSend={canSend && currentContextStatus !== null && !contextBusy && !savingContext && !compacting}
         images={images}
-        onRemoveImage={(i) => setImages(images.filter((_, j) => j !== i))}
+        onRemoveImage={(i) => {
+          const id = imageUploadIds[i];
+          setImages((prev) => prev.filter((_, j) => j !== i));
+          setImageUploadIds((prev) => prev.filter((_, j) => j !== i));
+          if (id) {
+            setAttachments((prev) => prev.filter((a) => a.upload_id !== id));
+            api.deleteUnusedUpload(id).catch((e) => stream.flashError(e.message));
+          }
+        }}
         attachments={attachments}
         onRemoveAttachment={(i) => {
           const removed = attachments[i];
           setAttachments((prev) => prev.filter((_, j) => j !== i));
-          if (removed?.upload_id) api.deleteUnusedUpload(removed.upload_id).catch((e) => stream.flashError(e.message));
+          if (removed?.upload_id) {
+            const imageIndex = imageUploadIds.indexOf(removed.upload_id);
+            if (imageIndex !== -1) {
+              setImages((prev) => prev.filter((_, j) => j !== imageIndex));
+              setImageUploadIds((prev) => prev.filter((_, j) => j !== imageIndex));
+            }
+            api.deleteUnusedUpload(removed.upload_id).catch((e) => stream.flashError(e.message));
+          }
         }}
         onFiles={addFiles}
         onPaste={handlePaste}
