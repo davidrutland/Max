@@ -162,6 +162,17 @@ class ChatContextBinding(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class IncomingUpload(Base):
+    """User-owned original binary upload, independent of inference messages."""
+    __tablename__ = "incoming_uploads"
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Artifact(Base):
     """Immutable published blob; the opaque ID is also its storage filename."""
     __tablename__ = "artifacts"

@@ -151,6 +151,14 @@ export const api = {
 
   // onPiece: {type:"thinking"|"content", text}
   // Extracts document text (PDF/docx/txt/code). Returns: {name, text, truncated}.
+  async uploadBinary(file) {
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${BASE}/uploads`, { method: "POST", body: form, credentials: "include" });
+    if (!resp.ok) throw new Error(`${resp.status} ${await resp.text()}`);
+    return resp.json();
+  },
+  deleteUnusedUpload: (id) => request(`/uploads/${encodeURIComponent(id)}`, { method: "DELETE" }),
   async extractFile(file) {
     const form = new FormData();
     form.append("file", file);

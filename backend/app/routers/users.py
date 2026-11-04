@@ -70,6 +70,9 @@ def delete_me(
     if user.id == SUPER_ADMIN_ID:
         raise HTTPException(403, "The super admin cannot be deleted")
     running = _delete_user_chats(db, user.id)
+    from app.upload_lifecycle import remove_user_files
+    from app.routers.uploads import ROOT
+    remove_user_files(db, ROOT, user.id)
     db.delete(user)
     db.commit()
     for chat_id in running:
@@ -131,6 +134,9 @@ def delete_user(
     if not user:
         raise HTTPException(404, "User not found")
     running = _delete_user_chats(db, user_id)
+    from app.upload_lifecycle import remove_user_files
+    from app.routers.uploads import ROOT
+    remove_user_files(db, ROOT, user_id)
     db.delete(user)
     db.commit()
     for chat_id in running:

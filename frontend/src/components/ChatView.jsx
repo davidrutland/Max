@@ -211,8 +211,15 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
     }
     for (const f of docs) {
       try {
-        const { name, text } = await api.extractFile(f);
-        setAttachments((prev) => [...prev, { name, text }]);
+        // Preserve arbitrary binaries; retain text extraction for supported document types.
+        const isDocument = /\.(pdf|docx|txt|md|markdown|csv|json|yml|yaml|log|py|js|jsx|ts|tsx|sh|html|css|xml|sql|toml|ini)$/i.test(f.name) || f.type.startsWith("text/");
+        if (isDocument) {
+          const { name, text } = await api.extractFile(f);
+          setAttachments((prev) => [...prev, { name, text }]);
+        } else {
+          const uploaded = await api.uploadBinary(f);
+          setAttachments((prev) => [...prev, { name: uploaded.name, upload_id: uploaded.id }]);
+        }
       } catch (e) {
         stream.flashError(`${f.name}: ${e.message}`);
       }
@@ -633,7 +640,11 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         images={images}
         onRemoveImage={(i) => setImages(images.filter((_, j) => j !== i))}
         attachments={attachments}
-        onRemoveAttachment={(i) => setAttachments(attachments.filter((_, j) => j !== i))}
+        onRemoveAttachment={(i) => {
+          const removed = attachments[i];
+          setAttachments((prev) => prev.filter((_, j) => j !== i));
+          if (removed?.upload_id) api.deleteUnusedUpload(removed.upload_id).catch((e) => stream.flashError(e.message));
+        }}
         onFiles={addFiles}
         onPaste={handlePaste}
         useTools={useTools}

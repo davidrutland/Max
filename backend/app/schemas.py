@@ -56,12 +56,14 @@ class SettingsUpdate(BaseModel):
 
 class AttachmentIn(BaseModel):
     name: str
-    text: str  # extracted document text (injected into the model's context)
+    text: str = ""  # extracted document text; empty for binary uploads
+    upload_id: str | None = None
 
 
 class AttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     name: str  # shown as a chip in the UI
+    upload_id: str | None = None
     # What a tool returned, for the inspection panel. `text` stays out: on a document
     # attachment it holds the whole extracted file, which would be re-sent on every chat load
     # for no purpose. `detail` is clipped at MAX_DETAIL_CHARS and is the only reason the panel

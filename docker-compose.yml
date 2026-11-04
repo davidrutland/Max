@@ -15,6 +15,8 @@ services:
       - SEARXNG_URL=http://calivi-searxng:8080
       - SANDBOX_BASE_URL=${SANDBOX_BASE_URL:-http://openhands-sandbox:8000}
       - SANDBOX_VISION_MAX_DIMENSION=${SANDBOX_VISION_MAX_DIMENSION:-720}
+      - MAX_FILE_UPLOAD_MIB=${MAX_FILE_UPLOAD_MIB:-1024}
+      - INCOMING_UPLOAD_PATH=/data/incoming_uploads
       # Signs the session cookies AND encrypts the secrets stored in the database (MCP
       # tokens, provider API keys). Left unset, the backend generates and persists
       # /data/secret_key — inside the same volume as calivi.db, so a copy of that volume (a

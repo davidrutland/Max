@@ -647,6 +647,16 @@ def _detail(chat: models.Chat) -> schemas.ChatDetailOut:
     return out.model_copy(update={**compaction.status(chat), "active_turn": turns.is_active(chat.id), "messages": updated_messages})
 
 
+def _validate_incoming_uploads(db, user, attachments):
+    """Reject forged upload IDs before accepting a message."""
+    from fastapi import HTTPException
+    from app import models
+    for attachment in attachments:
+        identifier = getattr(attachment, "upload_id", None)
+        if identifier and not db.query(models.IncomingUpload).filter_by(id=identifier, user_id=user.id).first():
+            raise HTTPException(404, "Uploaded file not found")
+
+
 def _inject_attachments(messages: list[dict]) -> list[dict]:
     """Prepends attachment text to the relevant message's content as context."""
     out = []
@@ -734,6 +744,8 @@ async def delete_chat(
     db: Session = Depends(get_db),
 ):
     chat = _owned_chat(db, chat_id, user)
+    from app.upload_lifecycle import ids_in_chat
+    deleted_upload_ids = ids_in_chat(db, chat_id)
     if config.CONTEXT_PERSISTENCE_MODE == "auto":
         try:
             owner = slot_owners.require()
@@ -755,6 +767,8 @@ async def delete_chat(
             db.delete(chat)
             db.commit()
             artifact_refs.reclaim(db)
+            from app.upload_lifecycle import reclaim_after_change
+            reclaim_after_change(db, user.id, deleted_upload_ids)
             # DB deletion is authoritative. A failed filesystem cleanup is
             # recoverable; never resurrect a deleted chat on cleanup failure.
             if owned_snapshot:
@@ -773,6 +787,8 @@ async def delete_chat(
         db.delete(chat)
         db.commit()
         artifact_refs.reclaim(db)
+        from app.upload_lifecycle import reclaim_after_change
+        reclaim_after_change(db, user.id, deleted_upload_ids)
     turns.cancel(chat_id)
 
 
@@ -1118,6 +1134,7 @@ async def send_message(
     db: Session = Depends(get_db),
 ):
     chat = _owned_chat(db, chat_id, user)
+    _validate_incoming_uploads(db, user, payload.attachments)
     _ensure_idle(chat.id)  # before the user message is saved, not after
 
     target, model = resolve_target(db, payload.server_id, payload.model)
@@ -1261,6 +1278,8 @@ async def delete_message(
     msg = db.get(models.Message, message_id)
     if not msg or msg.chat_id != chat_id:
         raise HTTPException(404, "Message not found in this chat")
+    from app.upload_lifecycle import ids_in_chat
+    deleted_upload_ids = ids_in_chat(db, chat_id, message_id)
 
     def mutate():
         _drop_summary_if_covers(db, chat_id, message_id)
@@ -1292,6 +1311,8 @@ async def delete_message(
 
 
     artifact_refs.reclaim(db)
+    from app.upload_lifecycle import reclaim_after_change
+    reclaim_after_change(db, user.id, deleted_upload_ids)
 
 
 @router.put("/{chat_id}/messages/{message_id}")
@@ -1309,6 +1330,8 @@ async def edit_message(
     if not msg or msg.chat_id != chat_id or msg.role not in ("user", "assistant"):
         raise HTTPException(404, "Editable message not found in this chat")
     target, model = resolve_target(db, payload.server_id, payload.model)
+    from app.upload_lifecycle import ids_in_chat, reclaim_after_change
+    removed_upload_ids = ids_in_chat(db, chat_id, message_id + 1)
 
     def mutate():
         _drop_summary_if_covers(db, chat_id, message_id)
@@ -1326,6 +1349,7 @@ async def edit_message(
         await _rewrite_persistent_history(db, chat_id, user, mutation=mutate,
                                           use_tools=payload.use_tools)
         artifact_refs.reclaim(db)
+        reclaim_after_change(db, user.id, removed_upload_ids)
         if msg.role == "assistant":
             return {"status": "updated", "chat_id": chat_id}
         history, summary = _context_of(db, chat_id)
@@ -1342,6 +1366,7 @@ async def edit_message(
             binding.snapshot_status = "absent"
     db.commit()
     artifact_refs.reclaim(db)
+    reclaim_after_change(db, user.id, removed_upload_ids)
     if msg.role == "assistant":
         return {"status": "updated", "chat_id": chat_id}
     history, summary = _context_of(db, chat_id)
@@ -1402,6 +1427,7 @@ async def fork_chat(
 ):
     """Forks a new chat from history (everything before message_id) with an edited prompt and a fresh reply."""
     chat = _owned_chat(db, chat_id, user)
+    _validate_incoming_uploads(db, user, payload.attachments)
     persistent_source = get_binding(db, chat_id, user.id) if config.CONTEXT_PERSISTENCE_MODE == "auto" else None
     if persistent_source is not None and not payload.confirm_new_context:
         raise HTTPException(409, "Fork requires explicit confirmation: a new conversation and independent SSD checkpoint will be created; changing model, instructions, or tools may rebuild context. The original remains intact.")

@@ -87,7 +87,10 @@ export default function Composer({
       {attachments.length > 0 && (
         <div className="flex gap-2 flex-wrap mb-2">
           {attachments.map((a, i) => (
-            <AttachmentChip key={i} name={a.name} onRemove={() => onRemoveAttachment(i)} />
+            <span key={i} className="inline-flex items-center gap-1">
+              <AttachmentChip name={a.name} onRemove={() => onRemoveAttachment(i)} />
+              {a.upload_id && <a href={`/api/uploads/${a.upload_id}/download`} title="Download original file" className="text-xs underline">↓</a>}
+            </span>
           ))}
         </div>
       )}
@@ -163,7 +166,6 @@ export default function Composer({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.yml,.yaml,.log,.py,.js,.jsx,.ts,.tsx,.sh,.html,.css,.xml,.sql,.toml,.ini"
         multiple
         hidden
         onChange={handleFileSelect}

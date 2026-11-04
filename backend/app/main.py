@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import CORS_ORIGINS
 from app.database import init_db, SessionLocal
 from app.artifact_store import reconcile
-from app.routers import servers, chats, config, extract, auth, users, mcp, search, router_control, artifacts
+from app.routers import servers, chats, config, extract, auth, users, mcp, search, router_control, artifacts, uploads
 from app.tools import mcp_client
 from app.context_startup import context_owner_lifespan
 
@@ -44,6 +44,7 @@ app.include_router(mcp.router)
 app.include_router(search.router)
 app.include_router(router_control.router)
 app.include_router(artifacts.router)
+app.include_router(uploads.router)
 
 
 @app.get("/api/health")
