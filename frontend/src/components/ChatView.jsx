@@ -21,9 +21,10 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const { serverId, model, setTarget, upServers, selectedServer } = useServerModel(servers);
   const [contextStatus, setContextStatus] = useState(null);
   const [readinessRefresh, setReadinessRefresh] = useState(0);
-  const routerTarget = contextStatus?.enabled === true &&
+  const routerOwner = contextStatus?.enabled === true &&
     contextStatus.owner_server_id === serverId && contextStatus.owner_is_router === true;
-  const modelReadiness = useModelReadiness(model, routerTarget, readinessRefresh);
+  const modelReadiness = useModelReadiness(model, routerOwner, readinessRefresh);
+  const routerTarget = routerOwner && modelReadiness.mode !== 'direct';
   const modelReady = !routerTarget || modelReadiness.ready;
   const checkpointTarget = contextStatus?.enabled === true &&
     contextStatus?.owner_server_id === serverId;
@@ -42,7 +43,10 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
     setSwitchingModel(true);
     try {
-      if (persistent && contextStatus?.owner_server_id === target.serverId && contextStatus?.owner_is_router === true) await api.selectRouterModel(target.model);
+      if (persistent && contextStatus?.owner_server_id === target.serverId &&
+          contextStatus?.owner_is_router === true && modelReadiness.mode !== 'direct') {
+        await api.selectRouterModel(target.model);
+      }
       setTarget(target);
     } catch (error) {
       window.alert(`Model selection failed: ${error.message}`);

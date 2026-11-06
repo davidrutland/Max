@@ -30,22 +30,35 @@ async def router_models(
         except (httpx.HTTPError, ValueError) as exc:
             raise HTTPException(502, "Cannot reach Buun router") from exc
 
+    entries = data.get("data")
+    if not isinstance(entries, list) or not entries:
+        raise HTTPException(502, "Cannot determine Buun operating mode")
+    statuses = [
+        isinstance(entry, dict)
+        and isinstance(entry.get("status"), dict)
+        and isinstance(entry["status"].get("value"), str)
+        for entry in entries
+    ]
+    if any(status != statuses[0] for status in statuses):
+        raise HTTPException(502, "Ambiguous Buun operating mode")
+    mode = "router" if statuses[0] else "direct"
+
     result = []
-    for entry in data.get("data", []):
+    for entry in entries:
         status = entry.get("status", {})
         result.append({
             "model": entry["id"],
             "status": status.get("value", "unknown"),
         })
     if config.CONTEXT_PERSISTENCE_MODE != "auto":
-        return {"server_id": None, "models": result}
+        return {"server_id": None, "mode": mode, "models": result}
 
     try:
         owner = slot_owners.require()
     except SlotOwnerError:
         raise HTTPException(503, "No verified inference-slot owner")
 
-    return {"server_id": owner.server_id, "models": result}
+    return {"server_id": owner.server_id, "mode": mode, "models": result}
 
 
 class ModelSelection(BaseModel):

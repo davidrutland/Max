@@ -7,11 +7,12 @@ export default function useModelReadiness(model, enabled = true, refresh = 0) {
     model: null,
     status: 'unknown',
     error: null,
+    mode: null,
   })
 
   useEffect(() => {
     if (!enabled || !model) {
-      setState({ model, status: 'unknown', error: null })
+      setState({ model, status: 'unknown', error: null, mode: null })
       return
     }
 
@@ -40,6 +41,7 @@ export default function useModelReadiness(model, enabled = true, refresh = 0) {
             model,
             status: entry?.status ?? 'unavailable',
             error: null,
+            mode: data.mode === 'direct' || data.mode === 'router' ? data.mode : null,
           })
         }
       } catch (error) {
@@ -48,6 +50,7 @@ export default function useModelReadiness(model, enabled = true, refresh = 0) {
             model,
             status: 'unavailable',
             error: error.message,
+            mode: null,
           })
         }
       } finally {
@@ -57,7 +60,7 @@ export default function useModelReadiness(model, enabled = true, refresh = 0) {
       }
     }
 
-    setState({ model, status: 'checking', error: null })
+    setState({ model, status: 'checking', error: null, mode: null })
     poll()
 
     return () => {
@@ -71,5 +74,6 @@ export default function useModelReadiness(model, enabled = true, refresh = 0) {
     status: state.model === model ? state.status : 'checking',
     error: state.model === model ? state.error : null,
     ready: enabled && state.model === model && state.status === 'loaded',
+    mode: enabled && state.model === model ? state.mode : null,
   }
 }

@@ -56,6 +56,45 @@ async def require_buun_model_ready(model: str) -> None:
         )
 
 
+async def live_buun_mode() -> TransportMode:
+    """Distinguish Buun router from direct llama-server via /v1/models."""
+    url = os.environ.get("BUUN_CONTEXT_URL", "").strip()
+    if not url:
+        raise ContextPreflightError("Buun endpoint not configured")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{url.rstrip('/')}/v1/models")
+            response.raise_for_status()
+            entries = response.json().get("data")
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        raise ContextPreflightError(f"Cannot identify Buun mode: {exc}") from exc
+    if not isinstance(entries, list) or not entries or not all(isinstance(e, dict) for e in entries):
+        raise ContextPreflightError("Cannot identify Buun mode from model inventory")
+    statuses = [isinstance(e.get("status"), dict) and
+                isinstance(e["status"].get("value"), str) for e in entries]
+    if len(set(statuses)) != 1:
+        raise ContextPreflightError("Ambiguous Buun mode")
+    return TransportMode.ROUTER if statuses[0] else TransportMode.DIRECT
+
+
+def apply_live_buun_mode(owner, mode: TransportMode) -> None:
+    """Select the matching slot HTTP operations, preserving configured persistence."""
+    from app.buun_context_transport import BuunTransport
+    coordinator = owner.coordinator
+    transport = coordinator._transport.transport
+    previous = transport.target
+    if previous.mode is mode:
+        return
+    # A different process now occupies the endpoint. Never treat its RAM slot
+    # as the old process's live context.
+    coordinator.orchestrator.reset_after_external_recovery()
+    if mode is TransportMode.DIRECT:
+        transport.target = BuunTransport(mode, previous.url)
+    else:
+        alias = os.environ.get("BUUN_CONTEXT_MODEL", "").strip()
+        transport.target = BuunTransport(mode, previous.url, alias=alias)
+
+
 async def get_buun_model_status(model: str) -> str:
     """Read the actual router worker state before any checkpoint handoff."""
     url = os.environ.get("BUUN_CONTEXT_URL", "").strip()
@@ -1168,7 +1207,10 @@ async def initialize_chat_context(
 
     async with owner.lock:
         try:
-            await require_buun_model_ready(model)
+            mode = await live_buun_mode()
+            apply_live_buun_mode(owner, mode)
+            if mode is TransportMode.ROUTER:
+                await require_buun_model_ready(model)
         except ContextPreflightError as exc:
             raise HTTPException(503, str(exc)) from exc
 
@@ -1212,6 +1254,8 @@ async def activate_chat_context(
 
     async with owner.lock:
         try:
+            mode = await live_buun_mode()
+            apply_live_buun_mode(owner, mode)
             # The transition owns readiness: it saves the outgoing worker
             # before loading the bound conversation's model.
             key = str(chat_id)
@@ -1226,11 +1270,11 @@ async def activate_chat_context(
                     chat_id, load_buun_model, get_status=get_buun_model_status
                 )
             else:
-                if coordinator._transport.transport.target.alias != binding.router_alias:
-                    raise HTTPException(409, "Direct model differs from conversation binding")
+                # Direct Buun has no router alias: the configured binding is
+                # checked by the normal compatibility preflight.
                 await coordinator.switch(chat_id)
 
-        except (BindingError, LiveContextError, ContextSwitchError) as exc:
+        except (BindingError, LiveContextError, ContextSwitchError, ContextPreflightError) as exc:
             raise HTTPException(409, str(exc)) from exc
 
     return {"active_chat_id": coordinator.active_chat_id}

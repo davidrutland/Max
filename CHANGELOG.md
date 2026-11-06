@@ -1,5 +1,16 @@
 ## Max
 
+### 2026-11-06 — Buun direct/router mode compatibility
+
+#### Fixed
+- Detect Buun router and direct-server modes from live model metadata.
+- Allow direct-mode inference without requiring router-specific model readiness.
+- Use the appropriate Buun transport during context initialization and activation.
+- Preserve existing SSD persistence configuration and checkpoint handling.
+- Maintain router model loading and readiness behaviour.
+
+
+
 ### 2026-11-04 — Chat attachment import into OpenHands
 
 #### Added
