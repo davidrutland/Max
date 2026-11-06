@@ -28,6 +28,7 @@ class SlotOwnerRegistry:
 
     def __init__(self):
         self._owner: SlotOwner | None = None
+        self._by_server: dict[int, SlotOwner] = {}
 
     def install(
         self,
@@ -38,7 +39,9 @@ class SlotOwnerRegistry:
         backend_identity: str | None = None,
         server_id: int | None = None,
     ) -> SlotOwner:
-        if self._owner is not None:
+        if server_id is not None and server_id in self._by_server:
+            raise SlotOwnerError("Inference-slot owner already installed for server")
+        if self._owner is not None and server_id is None:
             raise SlotOwnerError("Inference-slot owner already installed")
         if not isinstance(lock, asyncio.Lock):
             raise SlotOwnerError("A shared asyncio.Lock is required")
@@ -52,14 +55,30 @@ class SlotOwnerRegistry:
         elif backend_identity is not None:
             raise SlotOwnerError("Backend identity requires verified capability")
 
-        self._owner = SlotOwner(
+        owner = SlotOwner(
             lock=lock,
             coordinator=coordinator,
             capability=capability,
             backend_identity=backend_identity,
             server_id=server_id,
         )
-        return self._owner
+        if server_id is not None:
+            self._by_server[server_id] = owner
+        if self._owner is None:
+            self._owner = owner
+        return owner
+
+    def require_for_server(self, server_id: int) -> SlotOwner:
+        try:
+            return self._by_server[server_id]
+        except KeyError as exc:
+            raise SlotOwnerError("No inference-slot owner for server") from exc
+
+    def require_for_backend_identity(self, identity: str) -> SlotOwner:
+        matches = [owner for owner in self._by_server.values() if owner.backend_identity == identity]
+        if len(matches) != 1:
+            raise SlotOwnerError("No unique inference-slot owner for backend identity")
+        return matches[0]
 
     def require(self) -> SlotOwner:
         if self._owner is None:
@@ -68,9 +87,10 @@ class SlotOwnerRegistry:
 
     def clear(self) -> None:
         """Clear registration only; caller must first stop all active turns."""
-        if self._owner is not None and self._owner.lock.locked():
+        if any(owner.lock.locked() for owner in self._by_server.values()) or (self._owner is not None and self._owner.lock.locked()):
             raise SlotOwnerError("Cannot clear owner while slot is locked")
         self._owner = None
+        self._by_server.clear()
 
 
 slot_owners = SlotOwnerRegistry()

@@ -71,4 +71,12 @@ async def context_owner_lifespan():
         try:
             yield
         finally:
+            # Direct owners created on demand retain their own HTTP clients.
+            direct_clients = [
+                getattr(owner.coordinator, "_direct_http_client", None)
+                for owner in slot_owners._by_server.values()
+            ]
             slot_owners.clear()
+            for direct_client in direct_clients:
+                if direct_client is not None:
+                    await direct_client.aclose()

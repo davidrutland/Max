@@ -29,6 +29,8 @@ async def deferred_persistent_turn(
     check_ready: Callable | None = None,
     snapshot_turn_interval: int = 0,
     allow_configuration_change: bool = False,
+    load_model: Callable | None = None,
+    get_model_status: Callable | None = None,
 ) -> AsyncIterator[str]:
     """Prepare, verify and infer under one shared lock.
 
@@ -100,7 +102,10 @@ async def deferred_persistent_turn(
                 if verified is not True:
                     raise ValueError("Persistent binding was not verified")
 
-            await coordinator.switch(chat_id)
+            if load_model is not None:
+                await coordinator.switch_model(chat_id, load_model, get_status=get_model_status)
+            else:
+                await coordinator.switch(chat_id)
             coordinator.mark_dirty(chat_id)
 
             inference_messages, inference_tools = prepared.inference_copy()

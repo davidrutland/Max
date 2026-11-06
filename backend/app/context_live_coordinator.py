@@ -201,7 +201,7 @@ class LiveContextCoordinator:
                 return
             self._turns_since_checkpoint = 0
 
-    async def switch_model(self, chat_id: int, load_model):
+    async def switch_model(self, chat_id: int, load_model, get_status=None):
         """Activate a chat on its bound model; caller owns the shared slot lock.
 
         The model transition and snapshot restore are one indivisible operation
@@ -217,7 +217,7 @@ class LiveContextCoordinator:
             if binding is None or not binding.router_alias:
                 raise LiveContextError("Conversation model binding missing")
             model = binding.router_alias
-        await transition_model(self, model, load_model)
+        await transition_model(self, model, load_model, get_status=get_status)
         await self.switch(chat_id)
 
     async def switch(self, chat_id: int):

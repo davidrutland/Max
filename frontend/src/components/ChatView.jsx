@@ -22,9 +22,11 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   const [contextStatus, setContextStatus] = useState(null);
   const [readinessRefresh, setReadinessRefresh] = useState(0);
   const routerTarget = contextStatus?.enabled === true &&
-    contextStatus.owner_server_id === serverId && contextStatus.owner_model === model;
+    contextStatus.owner_server_id === serverId && contextStatus.owner_is_router === true;
   const modelReadiness = useModelReadiness(model, routerTarget, readinessRefresh);
   const modelReady = !routerTarget || modelReadiness.ready;
+  const checkpointTarget = contextStatus?.enabled === true &&
+    contextStatus?.owner_server_id === serverId;
   const [switchingModel, setSwitchingModel] = useState(false);
 
   async function handleModelSelection(target) {
@@ -40,7 +42,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
 
     setSwitchingModel(true);
     try {
-      if (persistent && contextStatus?.owner_server_id === target.serverId && contextStatus?.owner_model === target.model) await api.selectRouterModel(target.model);
+      if (persistent && contextStatus?.owner_server_id === target.serverId && contextStatus?.owner_is_router === true) await api.selectRouterModel(target.model);
       setTarget(target);
     } catch (error) {
       window.alert(`Model selection failed: ${error.message}`);
@@ -116,19 +118,19 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   }, [chat?.id]);
 
   useEffect(() => {
-    if (!routerTarget || !chat?.id || stream.sending) return;
+    if (!checkpointTarget || !chat?.id || stream.sending) return;
     refreshContextStatus(chat.id).catch(() => {});
-  }, [chat?.id, chat?.updated_at, routerTarget, stream.sending]);
+  }, [chat?.id, chat?.updated_at, checkpointTarget, stream.sending]);
 
   // Refresh the tick after background/automatic checkpoint writes and other tabs.
   useEffect(() => {
-    if (!routerTarget || !chat?.id || stream.sending || savingContext) return;
+    if (!checkpointTarget || !chat?.id || stream.sending || savingContext) return;
     const id = chat.id;
     const timer = setInterval(() => {
       refreshContextStatus(id).catch(() => {});
     }, 5000);
     return () => clearInterval(timer);
-  }, [chat?.id, routerTarget, stream.sending, savingContext]);
+  }, [chat?.id, checkpointTarget, stream.sending, savingContext]);
 
   const [input, setInput] = useState("");
   const [images, setImages] = useState([]); // scaled vision images
@@ -459,7 +461,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
   }
 
   async function handleSaveContext() {
-    if (!routerTarget || !persistent || !currentContextStatus?.initialized ||
+    if (!checkpointTarget || !persistent || !currentContextStatus?.initialized ||
         !contextActive || savingContext || compacting || stream.sending ||
         chat.active_turn || contextBusy || switchingModel) return;
     setSavingContext(true);
@@ -590,7 +592,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
             <CompactIcon className="w-5 h-5" />
           </button>
         )}
-        {routerTarget && persistent && currentContextStatus?.initialized && (
+        {checkpointTarget && persistent && currentContextStatus?.initialized && (
           <button
             type="button"
             onClick={handleSaveContext}
@@ -613,7 +615,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
         )}
         <button
           onClick={onOpenSettings}
-          className={`${chat.compactable || hostTools || (routerTarget && persistent && currentContextStatus?.initialized) ? "" : "ml-auto "}shrink-0 text-neutral-300 opacity-70 hover:opacity-100`}
+          className={`${chat.compactable || hostTools || (checkpointTarget && persistent && currentContextStatus?.initialized) ? "" : "ml-auto "}shrink-0 text-neutral-300 opacity-70 hover:opacity-100`}
           title={t("common.settings")}
         >
           <SettingsIcon className="w-5 h-5" />

@@ -56,6 +56,15 @@ async def require_buun_model_ready(model: str) -> None:
         )
 
 
+async def get_buun_model_status(model: str) -> str:
+    """Read the actual router worker state before any checkpoint handoff."""
+    url = os.environ.get("BUUN_CONTEXT_URL", "").strip()
+    if not url:
+        raise ContextPreflightError("Buun router not configured")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await BuunModelLoader(url, client).status(model)
+
+
 async def load_buun_model(model: str) -> None:
     """Load a router model and wait until its worker is ready for slot operations."""
     import asyncio
@@ -534,43 +543,39 @@ def build_stream_response(
 
     owner = _persistent_owner_for_target(target, model)
     if owner is not None:
-        try:
-            selection = select_context_route(
-                mode=config.CONTEXT_PERSISTENCE_MODE,
-                capability=owner.capability,
-                owners=slot_owners,
-            )
-        except (ContextRouteSelectionError, SlotOwnerError):
-            selection = None
+        # Owner eligibility was already resolved for this target. Do not
+        # reselect the process-default owner: direct servers have their own slot.
+        if user_id is None:
+            raise HTTPException(503, "Authenticated user required")
+        base_identity = binding_base_for_target(
+            selected_model=model,
+            backend_identity=owner.backend_identity,
+        )
 
-        if selection is not None and selection.persistent:
-            if user_id is None:
-                raise HTTPException(503, "Authenticated user required")
-            base_identity = binding_base_for_target(
-                selected_model=model,
-                backend_identity=owner.backend_identity,
-            )
+        async def persistent_infer(messages, tools_spec):
+            async for line in generate_prepared(messages, tools_spec):
+                yield line
 
-            async def persistent_infer(messages, tools_spec):
-                async for line in generate_prepared(messages, tools_spec):
-                    yield line
-
-            lines = deferred_persistent_turn(
-                chat_id=chat_id,
-                user_id=user_id,
-                capability=owner.capability,
-                slot_lock=owner.lock,
-                coordinator=owner.coordinator,
-                session_factory=SessionLocal,
-                base_identity=base_identity,
-                prepare=prepare,
-                infer=persistent_infer,
-                initialize_registration=initialize_and_register,
-                require_active=False,
-                check_ready=lambda: require_buun_model_ready(model),
-                snapshot_turn_interval=config.CONTEXT_SNAPSHOT_TURN_INTERVAL,
-                allow_configuration_change=confirm_configuration_change,
-            )
+        is_router = owner.coordinator._transport.transport.target.mode is TransportMode.ROUTER
+        lines = deferred_persistent_turn(
+            chat_id=chat_id,
+            user_id=user_id,
+            capability=owner.capability,
+            slot_lock=owner.lock,
+            coordinator=owner.coordinator,
+            session_factory=SessionLocal,
+            base_identity=base_identity,
+            prepare=prepare,
+            infer=persistent_infer,
+            initialize_registration=initialize_and_register,
+            require_active=False,
+            # Model readiness is established by switch_model after loading.
+            check_ready=None,
+            load_model=load_buun_model if is_router else None,
+            get_model_status=get_buun_model_status if is_router else None,
+            snapshot_turn_interval=config.CONTEXT_SNAPSHOT_TURN_INTERVAL,
+            allow_configuration_change=confirm_configuration_change,
+        )
 
     # The loop runs as a background task (turns.py): this response only follows it, so a
     # closed tab or a dropped connection no longer stops the reply (#85).
@@ -778,42 +783,54 @@ async def delete_chat(
     from app.upload_lifecycle import ids_in_chat
     deleted_upload_ids = ids_in_chat(db, chat_id)
     if config.CONTEXT_PERSISTENCE_MODE == "auto":
-        try:
-            owner = slot_owners.require()
-        except SlotOwnerError as exc:
-            raise HTTPException(503, "No verified inference-slot owner") from exc
-        async with owner.lock:
+        # A bound conversation must use its own backend's coordinator, never
+        # whichever server was registered first.
+        binding = get_binding(db, chat_id, user.id)
+        if binding is None:
+            # No snapshot exists to preserve; delete normally below.
+            owner = None
+        else:
+            owner, _ = _owner_for_bound_chat(db, chat_id, user.id)
+        if owner is not None:
+            async with owner.lock:
+                _ensure_idle(chat_id)
+                coordinator = owner.coordinator
+                orchestrator = coordinator.orchestrator
+                key = str(chat_id)
+                if orchestrator.active_chat == key:
+                    try:
+                        await coordinator.save_active()
+                        orchestrator.release_active()
+                    except (ContextSwitchError, LiveContextError) as exc:
+                        raise HTTPException(409, f"Cannot safely delete active conversation: {exc}") from exc
+                binding = get_binding(db, chat_id, user.id)
+                owned_snapshot = binding.snapshot_path if binding is not None else None
+                db.delete(chat)
+                db.commit()
+                artifact_refs.reclaim(db)
+                from app.upload_lifecycle import reclaim_after_change
+                reclaim_after_change(db, user.id, deleted_upload_ids)
+                # DB deletion is authoritative. A failed filesystem cleanup is
+                # recoverable; never resurrect a deleted chat on cleanup failure.
+                if owned_snapshot:
+                    try:
+                        coordinator.store.delete_owned(owned_snapshot)
+                    except Exception:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "Unable to delete snapshot for deleted chat %s", chat_id
+                        )
+                # Remove stale process-local ownership only after durable deletion.
+                orchestrator.contexts.pop(key, None)
+                coordinator.chat_ids.pop(key, None)
+                coordinator.chat_users.pop(key, None)
+        else:
             _ensure_idle(chat_id)
-            coordinator = owner.coordinator
-            orchestrator = coordinator.orchestrator
-            key = str(chat_id)
-            if orchestrator.active_chat == key:
-                try:
-                    await coordinator.save_active()
-                    orchestrator.release_active()
-                except (ContextSwitchError, LiveContextError) as exc:
-                    raise HTTPException(409, f"Cannot safely delete active conversation: {exc}") from exc
-            binding = get_binding(db, chat_id, user.id)
-            owned_snapshot = binding.snapshot_path if binding is not None else None
             db.delete(chat)
             db.commit()
             artifact_refs.reclaim(db)
             from app.upload_lifecycle import reclaim_after_change
             reclaim_after_change(db, user.id, deleted_upload_ids)
-            # DB deletion is authoritative. A failed filesystem cleanup is
-            # recoverable; never resurrect a deleted chat on cleanup failure.
-            if owned_snapshot:
-                try:
-                    coordinator.store.delete_owned(owned_snapshot)
-                except Exception:
-                    import logging
-                    logging.getLogger(__name__).exception(
-                        "Unable to delete snapshot for deleted chat %s", chat_id
-                    )
-            # Remove stale process-local ownership only after durable deletion.
-            orchestrator.contexts.pop(key, None)
-            coordinator.chat_ids.pop(key, None)
-            coordinator.chat_users.pop(key, None)
     else:
         db.delete(chat)
         db.commit()
@@ -825,33 +842,107 @@ async def delete_chat(
 
 
 def _persistent_owner_for_target(target: dict, model: str):
-    """Persistence is optional; only the configured owner may use its KV slot."""
-    if config.CONTEXT_PERSISTENCE_MODE != "auto":
+    """Select the configured Router owner or lazily register a direct server.
+
+    Persistence mode is the administrator's declaration of support. No probing.
+    """
+    if config.CONTEXT_PERSISTENCE_MODE != "auto" or not isinstance(model, str) or not model.strip():
+        return None
+    server_id = target.get("id")
+    if not isinstance(server_id, int):
         return None
     try:
-        owner = slot_owners.require()
-        configured = owner.coordinator._transport.transport.target
-        if (owner.capability is None or owner.backend_identity is None or
-                owner.server_id is None or target.get("id") != owner.server_id or
-                model != configured.alias):
-            return None
-        return owner
-    except (SlotOwnerError, AttributeError):
+        return slot_owners.require_for_server(server_id)
+    except SlotOwnerError:
+        pass
+
+    # Only the configured Router is a Router. Other selected OpenAI endpoints
+    # use the existing direct slot transport; no extra configuration required.
+    if target.get("type") != "openai":
         return None
+    base_url = (target.get("base_url") or "").strip().rstrip("/")
+    if not base_url:
+        return None
+    import asyncio
+    from app.buun_context_adapter import BuunContextAdapter
+    from app.buun_context_transport import BuunContextTransport, BuunTransport
+    from app.context_capabilities import ContextCapability
+    from app.context_live_coordinator import LiveContextCoordinator
+    from app.context_snapshot_files import SnapshotFileStore
+
+    # The OpenAI API URL often ends in /v1; slot operations live at the root.
+    endpoint = base_url[:-3] if base_url.endswith("/v1") else base_url
+    directory = os.environ.get("BUUN_SLOT_SAVE_PATH", "").strip()
+    if not directory:
+        raise HTTPException(503, "BUUN_SLOT_SAVE_PATH is required for persistence")
+    client = httpx.AsyncClient()
+    transport = BuunContextTransport(
+        BuunContextAdapter(client), BuunTransport(TransportMode.DIRECT, endpoint)
+    )
+    coordinator = LiveContextCoordinator(
+        SessionLocal, 0, SnapshotFileStore(directory), transport, slot_id=0
+    )
+    # Keep the client alive for the lifetime of its owner. The registry owns it.
+    coordinator._direct_http_client = client
+    try:
+        return slot_owners.install(
+            coordinator=coordinator, lock=asyncio.Lock(),
+            capability=ContextCapability(supported=True, backend="buun", reason="Persistence enabled by administrator"),
+            backend_identity=f"direct-server-{server_id}", server_id=server_id,
+        )
+    except SlotOwnerError:
+        # A concurrent request may have registered the same server.
+        # Close the unused client on the next event-loop cycle.
+        asyncio.get_running_loop().create_task(client.aclose())
+        return slot_owners.require_for_server(server_id)
 
 
 def _require_persistent_target(owner, target: dict, model: str) -> None:
-    """A persistent turn must use the router target owning the slot."""
-    configured = owner.coordinator._transport.transport.target
-    if model != configured.alias:
-        raise HTTPException(409, "Selected model differs from the persistent Buun model")
+    """Router aliases may change; the selected server must own the slot."""
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(409, "Selected model is missing")
     if owner.server_id is None or target.get("id") != owner.server_id:
         raise HTTPException(409, "Selected server differs from the persistent Buun server")
+
+
+def _owner_for_bound_chat(db, chat_id: int, user_id: int):
+    """Resolve the existing conversation's slot, never the process default.
+
+    A missing owner is an operational error, not permission to restore the
+    checkpoint into whichever worker happens to be active.
+    """
+    binding = get_binding(db, chat_id, user_id)
+    if binding is None:
+        raise HTTPException(409, "Conversation has no persistent binding")
+    try:
+        owner = slot_owners.require_for_backend_identity(binding.backend_identity)
+    except SlotOwnerError as exc:
+        # Direct owners are process-local and disappear on restart. Recreate
+        # only the owner named by this binding, using the existing server row.
+        prefix = "direct-server-"
+        identity = binding.backend_identity
+        if not identity.startswith(prefix) or not identity[len(prefix):].isdigit():
+            raise HTTPException(503, "Conversation persistence owner is unavailable") from exc
+        server_id = int(identity[len(prefix):])
+        server = db.get(models.Server, server_id)
+        if server is None or server.type != "openai":
+            raise HTTPException(503, "Conversation persistence server is unavailable") from exc
+        owner = _persistent_owner_for_target(
+            {"id": server.id, "type": server.type, "base_url": server.base_url},
+            binding.router_alias,
+        )
+        if owner is None or owner.backend_identity != identity:
+            raise HTTPException(503, "Conversation persistence owner is unavailable") from exc
+    if owner.capability is None or owner.backend_identity != binding.backend_identity:
+        raise HTTPException(503, "Conversation persistence owner is unverified")
+    return owner, binding
 
 
 def _checkpoint_current(db, chat_id: int, user_id: int, coordinator) -> bool:
     """Conservative: a verified committed file, and no dirty/uncertain live slot."""
     binding = get_binding(db, chat_id, user_id)
+    if binding is not None:
+        db.refresh(binding)
     if binding is None or binding.snapshot_status != "ready" or not binding.snapshot_path:
         return False
     orch = coordinator.orchestrator
@@ -871,12 +962,7 @@ async def save_chat_context(
     _owned_chat(db, chat_id, user)
     if config.CONTEXT_PERSISTENCE_MODE != "auto":
         raise HTTPException(409, "SSD persistence is disabled")
-    try:
-        owner = slot_owners.require()
-    except SlotOwnerError as exc:
-        raise HTTPException(503, "No verified inference-slot owner") from exc
-    if owner.capability is None or owner.backend_identity is None or owner.server_id is None:
-        raise HTTPException(503, "No verified persistence owner")
+    owner, binding = _owner_for_bound_chat(db, chat_id, user.id)
     # The same lock protects inference, activation, and checkpoint replacement.
     async with owner.lock:
         _ensure_idle(chat_id)
@@ -884,8 +970,6 @@ async def save_chat_context(
         orch = coordinator.orchestrator
         if orch.uncertain or orch.active_chat != str(chat_id):
             raise HTTPException(409, "Chat does not own a verified active context")
-        if get_binding(db, chat_id, user.id) is None:
-            raise HTTPException(409, "Chat has no initialized persistent context")
         try:
             await coordinator.save_active()
         except (ContextSwitchError, LiveContextError) as exc:
@@ -911,8 +995,10 @@ def context_persistence_status(
             "initialized": False,
         }
 
+    binding = get_binding(db, chat_id, user.id) if chat_id is not None else None
     try:
-        owner = slot_owners.require()
+        owner = (slot_owners.require_for_backend_identity(binding.backend_identity)
+                 if binding is not None else slot_owners.require())
     except SlotOwnerError:
         return {
             "enabled": False,
@@ -947,6 +1033,7 @@ def context_persistence_status(
         "checkpoint_current": checkpoint_current,
         "owner_server_id": owner.server_id,
         "owner_model": owner.coordinator._transport.transport.target.alias,
+        "owner_is_router": owner.coordinator._transport.transport.target.mode == TransportMode.ROUTER,
     }
 
 
@@ -1007,10 +1094,7 @@ async def check_chat_context_compatibility(
 
     _owned_chat(db, chat_id, user)
     if payload.continue_original:
-        try:
-            owner = slot_owners.require()
-        except SlotOwnerError as exc:
-            raise HTTPException(503, "No verified inference-slot owner") from exc
+        owner, _ = _owner_for_bound_chat(db, chat_id, user.id)
         history, summary = _context_of(db, chat_id)
         history.append({"role": "user", "content": payload.content,
                         "images": payload.images,
@@ -1124,24 +1208,12 @@ async def activate_chat_context(
 
     _owned_chat(db, chat_id, user)
 
-    try:
-        owner = slot_owners.require()
-    except Exception as exc:
-        raise HTTPException(503, "No verified inference-slot owner") from exc
+    owner, binding = _owner_for_bound_chat(db, chat_id, user.id)
 
     async with owner.lock:
         try:
-            binding = get_binding(db, chat_id, user.id)
-            if binding is None:
-                raise HTTPException(409, "Conversation has no persistent binding")
-
-            # Activation never loads a model. Check the already-running model
-            # before registering or touching the live inference slot.
-            try:
-                await require_buun_model_ready(binding.router_alias)
-            except ContextPreflightError as exc:
-                raise HTTPException(503, str(exc)) from exc
-
+            # The transition owns readiness: it saves the outgoing worker
+            # before loading the bound conversation's model.
             key = str(chat_id)
             coordinator = owner.coordinator
             if key not in coordinator.chat_ids:
@@ -1149,7 +1221,14 @@ async def activate_chat_context(
             elif coordinator.chat_users.get(key) != user.id:
                 raise HTTPException(409, "Conversation registration owner mismatch")
 
-            await coordinator.switch(chat_id)
+            if coordinator._transport.transport.target.mode is TransportMode.ROUTER:
+                await coordinator.switch_model(
+                    chat_id, load_buun_model, get_status=get_buun_model_status
+                )
+            else:
+                if coordinator._transport.transport.target.alias != binding.router_alias:
+                    raise HTTPException(409, "Direct model differs from conversation binding")
+                await coordinator.switch(chat_id)
 
         except (BindingError, LiveContextError, ContextSwitchError) as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -1174,10 +1253,7 @@ async def send_message(
     if payload.continue_original:
         if config.CONTEXT_PERSISTENCE_MODE != "auto":
             raise HTTPException(409, "Original-settings continuation requires persistence")
-        try:
-            original_owner = slot_owners.require()
-        except SlotOwnerError as exc:
-            raise HTTPException(503, "No verified inference-slot owner") from exc
+        original_owner, _ = _owner_for_bound_chat(db, chat_id, user.id)
         original_history, original_summary = _context_of(db, chat_id)
         original_history.append({"role": "user", "content": payload.content,
                                  "images": payload.images,
@@ -1263,14 +1339,8 @@ async def _rewrite_persistent_history(db: Session, chat_id: int, user: models.Us
     Database history is authoritative after the mutation commits. If prefill or
     checkpointing fails, the invalid snapshot cannot be restored on restart.
     """
-    try:
-        owner = slot_owners.require()
-    except SlotOwnerError as exc:
-        raise HTTPException(503, "Persistent inference slot unavailable") from exc
+    owner, binding = _owner_for_bound_chat(db, chat_id, user.id)
     coordinator = owner.coordinator
-    binding = get_binding(db, chat_id, user.id)
-    if binding is None:
-        raise HTTPException(409, "Conversation has no persistence binding")
 
     from contextlib import asynccontextmanager
 
@@ -1375,8 +1445,8 @@ async def edit_message(
         chat.updated_at = models.utcnow()
 
     if config.CONTEXT_PERSISTENCE_MODE == "auto" and db.get(models.ChatContextBinding, chat_id) is not None:
-        owner = slot_owners.require()
-        _require_persistent_target(owner, target, model)
+        # Editing invalidates the bound conversation's checkpoint; changing
+        # the selected model is handled by the ordinary subsequent send.
         await _rewrite_persistent_history(db, chat_id, user, mutation=mutate,
                                           use_tools=payload.use_tools)
         artifact_refs.reclaim(db)
@@ -1468,12 +1538,9 @@ async def fork_chat(
 
     target, model = resolve_target(db, payload.server_id, payload.model)
     if persistent_source is not None:
-        try:
-            owner = slot_owners.require()
-        except SlotOwnerError as exc:
-            raise HTTPException(503, "No verified inference-slot owner") from exc
-        if owner.server_id is None or target.get("id") != owner.server_id:
-            raise HTTPException(409, "Persistent fork must use the configured Buun server")
+        owner = _persistent_owner_for_target(target, model)
+        if owner is None:
+            raise HTTPException(503, "Selected server has no available persistence owner")
         # A fork is precisely where tool configuration may change.  Its
         # binding is created from the fork's own effective inference inputs,
         # never copied blindly from the parent.

@@ -10,7 +10,12 @@ class ModelTransitionError(RuntimeError):
     pass
 
 
-async def transition_model(coordinator, selected_model: str, load_model):
+async def transition_model(coordinator, selected_model: str, load_model, get_status=None):
+    """Save only through the worker that actually owns the outgoing slot.
+
+    A router may evict its worker independently of our in-process state.
+    Never send a stale checkpoint save to a different worker.
+    """
     transport = coordinator._transport.transport
     current = transport.target
     if not isinstance(selected_model, str) or not selected_model.strip():
@@ -19,17 +24,31 @@ async def transition_model(coordinator, selected_model: str, load_model):
         if current.alias != selected_model:
             raise ModelTransitionError("Cross-model transition requires a Buun router")
         return False
-    if current.alias == selected_model:
+
+    loaded = True
+    if get_status is not None:
+        try:
+            loaded = await get_status(current.alias) == "loaded"
+        except Exception as exc:
+            raise ModelTransitionError("Cannot verify outgoing router worker") from exc
+
+    if not loaded:
+        # The worker vanished. A dirty RAM context cannot be recovered from a
+        # different worker; never replace its last committed checkpoint.
+        if coordinator.orchestrator.dirty:
+            coordinator.orchestrator.uncertain = True
+            raise ModelTransitionError("Outgoing worker lost unsaved context; recovery required")
+    elif current.alias != selected_model:
+        # Must complete before loading a worker that could evict this one.
+        await coordinator.save_active()
+
+    if current.alias == selected_model and loaded:
         return False
-    # This must succeed before any operation that could evict the old model.
-    await coordinator.save_active()
     try:
         await load_model(selected_model)
     except Exception as exc:
-        # The router might already have evicted the old worker.
         coordinator.orchestrator.uncertain = True
         raise ModelTransitionError("Model load failed; slot recovery required") from exc
     transport.target = BuunTransport(current.mode, current.url, alias=selected_model)
-    # The new model has a different worker/slot, not the previous RAM state.
     coordinator.orchestrator.reset_after_external_recovery()
     return True
