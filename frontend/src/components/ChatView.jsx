@@ -452,6 +452,7 @@ export default function ChatView({ chat, servers, hostTools, onMessageSent, onFo
             cancelEdit();
             // Follow the new chat *before* switching to it, so the switch does not detach.
             stream.setChatId(newId);
+            setTarget(editTarget);
             onForked(newId);
           },
           onPiece
